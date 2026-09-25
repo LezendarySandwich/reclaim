@@ -80,6 +80,12 @@ If you think one is wrong, raise it and update `decisions.md` — do not quietly
 4. **Nothing is destructive without an explicit, per-action confirmation.** Unfollow and
    disconnect are irreversible and driven by a fallible classifier. Treat them accordingly.
 
+## Package manager
+
+**Use pnpm. npm does not work** — it dies with `Cannot read properties of null (reading 'edgesOut')`
+resolving vitest's optional peers. See ADR-017. `pnpm verify` runs build → build:firefox →
+typecheck → test and is what CI should run.
+
 ## Testing
 
 `src/core/` and `src/detect/` are pure and must have unit tests. Adapter extraction logic is

@@ -139,16 +139,122 @@ Export is opt-in, explicit, and clearly worded, because exporting labels means e
 ---
 
 ## ADR-009 — The model lives in a persistent offscreen document
-**2026-09-25 · Provisional — pending verification**
+**2026-09-25 · Accepted** — alternatives eliminated by evidence; chosen option pending spike S2
 
-MV3 service workers cannot use WebGPU and are evicted after ~30s idle, so the model cannot live
-there. Plan: a single `chrome.offscreen` document hosts one shared model instance; content scripts
-message into it. One instance total, not one per tab.
+A single `chrome.offscreen` document hosts one shared model instance. Content scripts message into
+it via the service worker. One instance for the whole browser, not one per tab.
 
-**Provisional because** it depends on WebGPU and the Prompt API both being usable from an offscreen
-document. This is under verification; if either fails, the fallback candidates are a hidden
-extension tab or per-tab instantiation in the content script's isolated world (at significant memory
-cost). Update this entry with the verified answer before building the model layer.
+**Every alternative is now eliminated on evidence, which is stronger than the original reasoning:**
+
+- *Service worker* — impossible, not merely awkward. `LanguageModel` is exposed to Window contexts
+  under `RuntimeEnabled=AIPromptAPI` but to Worker contexts only under the separate
+  `AIPromptAPIForWorkers`, which is declared in the Chrome 153 binary with no `status` field (off by
+  default everywhere) and **has no `chrome://flags` entry**. There is no user-flippable escape
+  hatch. Chrome's own extension docs say "The Prompt API isn't available in Web Workers for now."
+- *Content script* — three independent reasons. Inference would be attributed to LinkedIn's origin;
+  `language-model` is a real `Permissions-Policy` token in Chrome 153, so **LinkedIn could disable
+  it with one response header**; and a per-tab session multiplies a multi-gigabyte model.
+- *Extension page* — viable but requires a tab to stay open. Retained for one specific job: it is
+  the only context that can supply the user gesture `create()` demands (ADR-013).
+
+**Still unconfirmed:** whether `LanguageModel` and `navigator.gpu` actually work *inside* an
+offscreen document. That is spike S2, and it gates the WebLLM tier entirely. The mitigation is
+structural rather than speculative — a message boundary at `classify(posts) → verdicts` means
+nothing upstream knows where inference runs, so relocating the host is a one-file change.
+
+Consequence recorded in ADR-015: this design does not port to Firefox or Safari.
+
+---
+
+## ADR-013 — First run forces a model choice; Gemini Nano is not a zero-download default
+**2026-09-25 · Accepted · supersedes ADR-003**
+
+ADR-003 was built on a false premise — mine. Gemini Nano is **not** bundled with Chrome. It is a
+component-updater download measured at **4,269,932,544 bytes** (`weights.bin`, verified on disk)
+plus a separate ~120 MB safety classifier, gated on detected VRAM and two free-disk thresholds, and
+disableable by the `GenAILocalFoundationalModelSettings` enterprise policy. Decisively,
+`create()` **requires a transient user gesture** whenever availability is `"downloadable"` or
+`"downloading"` (Blink: `Requires a user gesture when availability is "downloading" or "downloadable".`).
+
+So there is no free default, and every model path costs a large download. Onboarding therefore
+makes the choice explicit: on first run the user picks a model and installs it, from the dashboard,
+behind a click. Until then the extension hides nothing and says so.
+
+**Structural consequences:**
+1. A model download can only ever be initiated from an extension page — not the service worker, not
+   the offscreen document, neither of which can supply a gesture.
+2. Because a WebLLM 1.5B model is roughly 1 GB against Nano's 4.27 GB, **Nano is not automatically
+   the lightest option.** It is still the recommended first choice — it is shared across all of
+   Chrome rather than costing us private storage, and it avoids the unresolved remote-hosted-code
+   question hanging over WebLLM (brief R10) — but the model picker must show real sizes and let the
+   user judge.
+3. Hardware-gating and enterprise-policy blocking are **indistinguishable** from an extension; both
+   surface as `"unavailable"` forever. The copy must cover both causes and point at
+   `chrome://on-device-internals`.
+
+**Rejected:** heuristics hiding on both axes until a model arrives (abandons ADR-004's protection
+against penalising non-native English writers); a narrow high-precision heuristic that may hide
+engagement bait only (defensible, and reconsider if install-to-activation conversion is poor, but it
+reintroduces rules-that-hide through a side door); holding the line at model-or-nothing with no
+onboarding push (honest, but leaves most installs silently inert).
+
+---
+
+## ADR-014 — `chrome.storage.sync` is banned
+**2026-09-25 · Accepted**
+
+Settings live in `chrome.storage.local`; post history and aggregates live in IndexedDB, written
+solely by the offscreen document. `chrome.storage.sync` is not used anywhere.
+
+**Why:** `sync` uploads to Google's servers. However convenient cross-device settings would be, it
+would make ADR-002's "nothing leaves the machine" claim false. The guarantee has to be structural.
+
+---
+
+## ADR-015 — Cross-browser means the UI shell, not the model layer
+**2026-09-25 · Accepted**
+
+WXT is the toolchain and the content script, adapter, extraction, triage router, stub UI, storage
+and dashboard all port. **The model layer does not port to anything.**
+
+- **Firefox** has WONTFIX'd `chrome.offscreen` (Bugzilla 1807830 — Mozilla's position is that event
+  pages already have a DOM), ships WebGPU as `partial_implementation: "Supported on Windows only"`,
+  and has no Prompt API. Its MV3 background *is* a DOM page, so the engine can live there directly —
+  the asymmetry works in our favour — but Firefox is WebLLM-or-nothing, and WebLLM is Windows-only
+  until bug 2006676 lands.
+- **Safari** has neither offscreen documents nor a JS-reachable on-device model; Apple's
+  `FoundationModels` is a Swift framework reachable only through a native-messaging hop to a
+  container app. Safari is a second implementation, not a port, and is scheduled last.
+
+**Why record this:** the roadmap said "Chrome, then Firefox, then Safari" as though it were a
+porting exercise. It is not, and planning on that basis would be planning on a fiction.
+
+---
+
+## ADR-016 — Bulk unfollow ships as a separate extension, not a feature of this one
+**2026-09-25 · Accepted · extends ADR-011**
+
+When the unfollow feature eventually ships, it ships under its own extension ID and its own store
+listing. It is never added to this package.
+
+**Why:** the two products have incompatible risk profiles. This extension only reads and hides,
+locally — a defensible position against LinkedIn's User Agreement and an easy Chrome Web Store
+review. An extension that performs write actions on a third-party site is a different conversation
+with both, and a rejection or takedown there must not be able to take the filter down with it.
+Separate IDs make that blast radius explicit.
+
+---
+
+## ADR-017 — pnpm is required; npm cannot install this project
+**2026-09-25 · Accepted**
+
+**Why:** not a preference. `npm install` fails outright with
+`TypeError: Cannot read properties of null (reading 'edgesOut')` in arborist's `#loadPeerSet` while
+resolving vitest's optional peers (`@vitest/browser`, `@vitest/ui`). Reproduced on npm 10.9.2 /
+node 23.11.0 after a full cache clean. pnpm 12.6.0 installs the same tree in 9 seconds.
+
+Recorded as a decision rather than a note because a future agent hitting that error will otherwise
+waste time assuming the dependency list is wrong.
 
 ---
 

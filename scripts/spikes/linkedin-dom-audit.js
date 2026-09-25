@@ -218,6 +218,9 @@ async function linkedinDomAudit() {
   // ───────────────────── 6. Field selector coverage ─────────────────────
   const FIELDS = {
     authorName: [
+      'a[componentkey="author-name-key"]',
+      '[componentkey="name-key"]',
+      '[componentkey="company-name-key"]',
       '[data-view-name*="feed-actor"] a[href*="/in/"] span[aria-hidden="true"]',
       'a[data-view-name*="actor"][href] span[aria-hidden="true"]',
       '.update-components-actor__title span[aria-hidden="true"]',
@@ -226,6 +229,9 @@ async function linkedinDomAudit() {
       'a[href*="/in/"]',
     ],
     authorProfileUrl: [
+      'a[componentkey="author-name-key"][href]',
+      'a[componentkey="author-avatar-key"][href]',
+      'a[componentkey="company-logo-key"][href]',
       'a[data-view-name*="feed-actor"][href]',
       'a[data-view-name="feed-header-actor-image"][href]',
       '.update-components-actor__meta-link[href]',
@@ -233,6 +239,8 @@ async function linkedinDomAudit() {
       'a[href*="/company/"]',
     ],
     bodyText: [
+      'p[componentkey="body-key"]',
+      'p[componentkey^="feed-commentary"]',
       '[data-testid="expandable-text-box"]',
       '[data-view-name="feed-commentary"]',
       '[data-view-name*="commentary"]',
@@ -262,6 +270,8 @@ async function linkedinDomAudit() {
       'img',
     ],
     promoted: [
+      '[componentkey="sponsored-indicator-key"]',
+      '[data-sponsored-tracking-url]',
       'article[data-sponsored-tracking-url]',
       '[data-is-sponsored="true"]',
       '[componentkey*="urn:li:sponsoredContentV2"]',

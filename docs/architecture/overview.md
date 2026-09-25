@@ -3,10 +3,12 @@
 The validated design. Decisions behind it are in `../product/decisions.md`; externally-verified
 facts about Chrome, WebGPU and LinkedIn are in `technical-brief.md`.
 
-> **Status:** the execution-context layout below assumes WebGPU and the Prompt API are usable from
-> a `chrome.offscreen` document. That is ADR-009 and is provisional pending verification. If it
-> fails, the model host moves, but nothing else in this document changes — which is the point of
-> the seams.
+> **Status:** every *alternative* model host is now eliminated on evidence — the service worker
+> cannot run the Prompt API at all (`AIPromptAPIForWorkers`, no flag), and a content script is
+> exposed to LinkedIn's `Permissions-Policy: language-model=()` kill switch. What remains
+> unconfirmed is whether `LanguageModel` and `navigator.gpu` work *inside* an offscreen document
+> (spike S2). If they do not, the host moves and nothing else in this document changes — which is
+> the point of the seams. See ADR-009 and `technical-brief.md` §2.
 
 ## System
 
