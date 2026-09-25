@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "PA Probe",
+  "version": "1.0",
+  "background": { "service_worker": "sw.js" },
+  "host_permissions": ["http://127.0.0.1/*"]
+}

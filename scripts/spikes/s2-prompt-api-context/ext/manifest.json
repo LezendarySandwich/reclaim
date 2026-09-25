@@ -3,18 +3,40 @@
   "name": "PromptAPI Context Probe",
   "version": "1.0",
   "description": "Probes LanguageModel availability across MV3 contexts.",
-  "permissions": ["offscreen", "storage", "scripting", "tabs"],
-  "host_permissions": ["https://*.linkedin.localtest.me/*", "https://*.other.localtest.me/*"],
-  "background": { "service_worker": "sw.js" },
+  "permissions": [
+    "offscreen",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.linkedin.localtest.me/*",
+    "https://*.other.localtest.me/*"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  },
   "content_scripts": [
     {
-      "matches": ["https://*.linkedin.localtest.me/*"],
-      "js": ["probe.js", "content.js"],
+      "matches": [
+        "https://*.linkedin.localtest.me/*"
+      ],
+      "js": [
+        "probe.js",
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
   ],
   "web_accessible_resources": [
-    { "resources": ["mainworld.js"], "matches": ["https://*.linkedin.localtest.me/*"] }
+    {
+      "resources": [
+        "mainworld.js"
+      ],
+      "matches": [
+        "https://*.linkedin.localtest.me/*"
+      ]
+    }
   ]
 }
