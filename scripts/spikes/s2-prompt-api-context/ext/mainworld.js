@@ -1,4 +1,4 @@
-// Runs in the PAGE's MAIN world at the page origin (https://www.linkedin.test).
+// Runs in the PAGE's MAIN world at the page origin (https://www.linkedin.localtest.me).
 (async () => {
   const r = {
     ctx: 'PAGE_MAIN_WORLD',
@@ -22,7 +22,7 @@
     try { r.availability = await window.LanguageModel.availability(); }
     catch (e) { r.availabilityError = e.name + ': ' + e.message; }
   }
-  await fetch('https://www.linkedin.test:8443/report', {
+  await fetch('https://www.linkedin.localtest.me:8443/report', {
     method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(r),
   }).catch(() => {});
 })();

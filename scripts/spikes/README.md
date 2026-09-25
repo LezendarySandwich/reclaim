@@ -32,6 +32,16 @@ content-script isolated world, page main world, and both iframes. Takes ~60s.
 It symlinks your real `OptGuideOnDeviceModel` directory into the throwaway profile so it can see an
 already-downloaded Nano without re-downloading 4.27 GB.
 
+**If it fails:** the script preflights Chrome's path, DNS resolution, and the port, and warns if
+Chrome is already running — a running instance can swallow the URLs into itself and drop every
+command-line flag, so quit Chrome first if the probe reports nothing.
+
+Known trap, already handled: this machine proxies HTTP through `localhost:10054`, and `NO_PROXY`
+covers only `127.0.0.1`/`localhost`/`::1`. A proxy makes `--host-resolver-rules` a no-op, because
+the proxy resolves names itself — which is what produced `DNS_PROBE_STARTED` on the first attempt.
+Fixed two ways: the harness uses `*.localtest.me` (public DNS → 127.0.0.1) and passes
+`--no-proxy-server`.
+
 ## S4 — LinkedIn feed DOM
 
 **Blocks:** the adapter, and therefore everything visible.

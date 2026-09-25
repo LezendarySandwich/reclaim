@@ -1,12 +1,14 @@
 import http.server, ssl, json, sys, threading, os
 
-OUT = '/tmp/pmprobe/results.jsonl'
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, 'results.jsonl')
 
 PAGE = """<!doctype html><meta charset=utf-8><title>%(title)s</title>
 <h1>%(title)s</h1>
 <p>PP header sent: <code>%(pp)s</code></p>
 <iframe src="/frame?label=same-origin-iframe" style="width:300px;height:80px"></iframe>
-<iframe src="https://cdn.other.test:8443/frame?label=cross-origin-iframe" style="width:300px;height:80px"></iframe>
+<iframe src="https://cdn.other.localtest.me:8443/frame?label=cross-origin-iframe" style="width:300px;height:80px"></iframe>
 <script>
 (async () => {
   const r = {ctx:'PAGE_INLINE', href:location.href, origin:location.origin,
@@ -18,7 +20,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>%(title)s</title>
       r.ppHasToken = fp.features().includes('language-model');
       r.ppAllFeatures = fp.features().sort(); }
   } catch(e){ r.ppErr=String(e); }
-  fetch('https://www.linkedin.test:8443/report',{method:'POST',body:JSON.stringify(r)}).catch(()=>{});
+  fetch('https://www.linkedin.localtest.me:8443/report',{method:'POST',body:JSON.stringify(r)}).catch(()=>{});
 })();
 </script>
 """
@@ -35,7 +37,7 @@ FRAME = """<!doctype html><meta charset=utf-8><html data-frame-label="%(label)s"
     try { r.availability = await window.LanguageModel.availability(); }
     catch(e){ r.availabilityError = e.name+': '+e.message; }
   }
-  fetch('https://www.linkedin.test:8443/report',{method:'POST',body:JSON.stringify(r),mode:'cors'}).catch(()=>{});
+  fetch('https://www.linkedin.localtest.me:8443/report',{method:'POST',body:JSON.stringify(r),mode:'cors'}).catch(()=>{});
 })();
 </script></body></html>
 """
@@ -88,7 +90,7 @@ class H(http.server.BaseHTTPRequestHandler):
 if __name__ == '__main__':
     open(OUT, 'w').close()
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain('/tmp/pmprobe/srv/cert.pem', '/tmp/pmprobe/srv/key.pem')
+    ctx.load_cert_chain(os.path.join(HERE, 'cert.pem'), os.path.join(HERE, 'key.pem'))
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', 8443), H)
     srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
     print('serving https on 127.0.0.1:8443', flush=True)

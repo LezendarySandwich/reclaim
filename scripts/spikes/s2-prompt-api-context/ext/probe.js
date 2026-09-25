@@ -1,5 +1,5 @@
 // Shared probe. Loaded as classic script / importScripts'd everywhere.
-globalThis.REPORT_URL = 'https://www.linkedin.test:8443/report';
+globalThis.REPORT_URL = 'https://www.linkedin.localtest.me:8443/report';
 
 globalThis.pmProbe = async function pmProbe(ctx, extra) {
   const g = globalThis;
