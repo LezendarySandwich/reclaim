@@ -1,0 +1,33 @@
+{
+  "name": "reclaim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hides AI-generated and engagement-bait content from social feeds. On-device classification, nothing leaves your machine.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "prepare": "wxt prepare",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "verify": "pnpm build && pnpm build:firefox && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@webext-core/fake-browser": "2.0.1",
+    "happy-dom": "20.14.5",
+    "typescript": "5.9.3",
+    "vite": "8.3.1",
+    "vitest": "5.0.2",
+    "wxt": "0.21.4"
+  }
+}
