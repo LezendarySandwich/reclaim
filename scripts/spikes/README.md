@@ -32,6 +32,20 @@ content-script isolated world, page main world, and both iframes. Takes ~60s.
 It symlinks your real `OptGuideOnDeviceModel` directory into the throwaway profile so it can see an
 already-downloaded Nano without re-downloading 4.27 GB.
 
+**You will have to load the extension by hand.** Chrome silently ignores `--load-extension` now
+(verified on 153.0.8010.53: the throwaway profile registered zero extensions and logged no error).
+The script detects this, prints the three clicks needed — `chrome://extensions` → Developer mode →
+Load unpacked → `ext/` — and keeps watching `results.jsonl` while you do it.
+
+**Already answered by this spike (2026-09-25):** `language-model` is a real Permissions-Policy
+token, and a host page controls it. `/feed` reported `allowsFeature('language-model') === true`;
+`/feed-blocked`, served with `Permissions-Policy: language-model=()`, reported `false` — and
+`availability()` flipped from `downloadable` to `unavailable` with it. A site can switch the Prompt
+API off for its own pages with one response header. Also confirmed on this machine: Nano is
+`downloadable`, i.e. not yet installed but the hardware qualifies.
+
+**Still open:** every extension context. That is the part that decides ADR-009.
+
 **If it fails:** the script preflights Chrome's path, DNS resolution, and the port, and warns if
 Chrome is already running — a running instance can swallow the URLs into itself and drop every
 command-line flag, so quit Chrome first if the probe reports nothing.

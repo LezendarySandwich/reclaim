@@ -3,10 +3,15 @@
 #
 # Settles empirically, in YOUR Chrome, whether `LanguageModel` and `navigator.gpu` work inside an
 # offscreen document, and whether a host page's Permissions-Policy reaches a content script's
-# isolated world. See ../README.md for what to look for in the output.
+# isolated world. See ../README.md for what the output means.
 #
 # Run from a normal Terminal. NOT from an agent session — Chrome cannot register Mach ports
 # inside the agent sandbox and dies with `bootstrap_check_in ... Permission denied (1100)`.
+#
+# Chrome will NOT auto-load the probe extension: --load-extension was restricted as an
+# anti-malware measure and is now silently ignored (verified on 153.0.8010.53 — the profile's
+# Preferences showed zero registered extensions). The script tries the debugging flag that
+# sometimes re-enables it, then falls back to asking you to click three things.
 
 set -euo pipefail
 cd "$(cd "$(dirname "$0")" && pwd)"
@@ -18,38 +23,50 @@ PORT=8443
 
 fail() { print -u2 "\n✗ $1\n"; exit 1; }
 
-# ─────────────────────────── preflight ───────────────────────────
-# Each of these has silently produced a confusing browser error page at least once.
+# grep -c prints "0" AND exits 1 on an empty file, so `|| print 0` would append a SECOND zero and
+# produce "0 0" — which is what crashed the previous version with "bad math expression".
+count() { grep -c . results.jsonl 2>/dev/null || true; }
 
+ext_contexts() {
+  python3 - "$ROOT/results.jsonl" <<'PY' 2>/dev/null || print 0
+import json, sys
+ctx = set()
+try:
+    for line in open(sys.argv[1]):
+        line = line.strip()
+        if line:
+            try: ctx.add(json.loads(line).get('ctx'))
+            except Exception: pass
+except Exception: pass
+print(len(ctx & {'SERVICE_WORKER', 'OFFSCREEN', 'EXTENSION_PAGE', 'CONTENT_ISOLATED', 'WORKER'}))
+PY
+}
+
+# ─────────────────────────── preflight ───────────────────────────
 [[ -x "$CHROME" ]] || fail "Chrome not found at:\n    $CHROME\nEdit CHROME= at the top of this script."
 
-# *.localtest.me is public DNS pointing at 127.0.0.1 — no /etc/hosts edit and no reliance on
-# Chrome's --host-resolver-rules.
+# *.localtest.me is public DNS pointing at 127.0.0.1 — no /etc/hosts edit needed.
 #
-# The first version of this script used *.test with --host-resolver-rules and failed with
-# DNS_PROBE_STARTED. Cause: this machine runs a proxy on localhost:10054, and NO_PROXY covers only
-# 127.0.0.1/localhost/::1. --host-resolver-rules is ignored whenever a proxy is in play, because
-# the proxy performs name resolution, and the proxy could not resolve a .test name. Hence both the
-# publicly-resolvable hostname and --no-proxy-server below: either alone would fix it, together
-# they are robust to whatever proxy config the next machine has.
+# The first version used *.test with --host-resolver-rules and failed with DNS_PROBE_STARTED,
+# because this machine proxies through localhost:10054 and NO_PROXY covers only
+# 127.0.0.1/localhost/::1. --host-resolver-rules is a no-op whenever a proxy is in play, since the
+# proxy resolves names itself. Hence both a publicly-resolvable host AND --no-proxy-server below.
 resolved=$(python3 -c "import socket
 try: print(socket.gethostbyname('$HOST'))
 except Exception as e: print('FAIL: '+str(e))")
-[[ "$resolved" == "127.0.0.1" ]] || fail "$HOST resolved to '$resolved', expected 127.0.0.1.\nIf you are offline, add to /etc/hosts:\n    127.0.0.1 $HOST cdn.other.localtest.me"
+[[ "$resolved" == "127.0.0.1" ]] || fail "$HOST resolved to '$resolved', expected 127.0.0.1.\nIf offline, add to /etc/hosts:\n    127.0.0.1 $HOST cdn.other.localtest.me"
 
 if pgrep -x "Google Chrome" >/dev/null 2>&1; then
-  print -u2 "⚠ Chrome is already running. A running instance can swallow these URLs into itself,"
-  print -u2 "  losing every command-line flag. If the probe reports nothing, quit Chrome and rerun."
-  print -u2 ""
+  print -u2 "⚠ Chrome is already running. A live instance can swallow these URLs and drop every"
+  print -u2 "  command-line flag. Quit Chrome entirely if the probe reports nothing.\n"
 fi
 
-if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
-  fail "Port $PORT is already in use:\n$(lsof -nP -iTCP:$PORT -sTCP:LISTEN | tail -n +2)"
-fi
+lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 && \
+  fail "Port $PORT is in use:\n$(lsof -nP -iTCP:$PORT -sTCP:LISTEN | tail -n +2)"
 
 # ─────────────────────────── server ───────────────────────────
 : > results.jsonl
-python3 srv/server.py & SRV=$!
+python3 srv/server.py >srv.log 2>&1 & SRV=$!
 cleanup() { kill $SRV 2>/dev/null || true; kill ${CHR:-0} 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
@@ -62,7 +79,7 @@ print "✓ server up on https://$HOST:$PORT"
 
 # ─────────────────────────── chrome ───────────────────────────
 rm -rf profile && mkdir -p profile
-# Symlink the real on-device model directory into the throwaway profile, so it can see an
+# Symlink the real on-device model directory into the throwaway profile so it can see an
 # already-downloaded Gemini Nano instead of pulling 4.27 GB.
 ln -s "$HOME/Library/Application Support/Google/Chrome/OptGuideOnDeviceModel" \
       profile/OptGuideOnDeviceModel 2>/dev/null || true
@@ -71,95 +88,60 @@ ln -s "$HOME/Library/Application Support/Google/Chrome/OptGuideOnDeviceModel" \
   --user-data-dir="$ROOT/profile" \
   --no-first-run --no-default-browser-check --disable-search-engine-choice-screen \
   --disable-extensions-except="$ROOT/ext" --load-extension="$ROOT/ext" \
-  --ignore-certificate-errors \
-  --no-proxy-server \
+  --enable-unsafe-extension-debugging \
+  --ignore-certificate-errors --no-proxy-server \
   --host-resolver-rules="MAP *.localtest.me 127.0.0.1" \
   "https://$HOST:$PORT/feed" "https://$HOST:$PORT/feed-blocked" \
   >chrome.log 2>&1 &
 CHR=$!
+print "✓ chrome launched (pid $CHR)"
 
-# Poll rather than sleeping blind, so a fast machine is not made to wait and a slow one is not
-# cut off early.
-print -n "waiting for probes"
-for i in {1..60}; do
+print -n "waiting for page probes"
+for i in {1..20}; do sleep 0.5; print -n "."; [[ $(count) -ge 4 ]] && break; done
+print ""
+
+# Did the extension actually load? Read it out of the profile rather than assuming.
+ext_loaded=$(python3 - "$ROOT/profile/Default/Preferences" <<'PY' 2>/dev/null || print 0
+import json, sys
+try: print(len(json.load(open(sys.argv[1])).get('extensions', {}).get('settings', {})))
+except Exception: print(0)
+PY
+)
+
+if [[ "$ext_loaded" == "0" ]]; then
+  print ""
+  print "──────────────────────────────────────────────────────────────────────"
+  print " Chrome ignored --load-extension (registered extensions: 0)."
+  print " Expected on current Chrome. Load it by hand — about 20 seconds:"
+  print ""
+  print "   1. In the Chrome window that just opened, visit:  chrome://extensions"
+  print "   2. Toggle ON \"Developer mode\" (top right)"
+  print "   3. Click \"Load unpacked\" and select this folder:"
+  print ""
+  print "        $ROOT/ext"
+  print ""
+  print "   4. Then open these two tabs:"
+  print "        https://$HOST:$PORT/feed"
+  print "        https://$HOST:$PORT/feed-blocked"
+  print ""
+  print " Leave them for a few seconds. This script is watching results.jsonl."
+  print "──────────────────────────────────────────────────────────────────────"
+  print ""
+fi
+
+print -n "waiting for extension probes (up to 4 min; Ctrl-C to stop and report anyway)"
+for i in {1..240}; do
   sleep 1
-  print -n "."
-  n=$(grep -c . results.jsonl 2>/dev/null || print 0)
-  [[ $n -ge 8 ]] && break
+  (( i % 5 == 0 )) && print -n "."
+  [[ "$(ext_contexts)" -ge 4 ]] && { print "\n✓ extension contexts reported"; break; }
 done
 print ""
 
+# ─────────────────────────── results ───────────────────────────
 kill $CHR 2>/dev/null || true
 sleep 0.5
+python3 report.py || true
 
-# ─────────────────────────── results ───────────────────────────
-print "\n==================== RESULTS ====================\n"
-ROOT="$ROOT" python3 - <<'PY'
-import json, os
-
-path = os.path.join(os.environ['ROOT'], 'results.jsonl')
-rows = []
-with open(path) as fh:
-    for line in fh:
-        line = line.strip()
-        if line:
-            try: rows.append(json.loads(line))
-            except json.JSONDecodeError: pass
-
-if not rows:
-    print("NO RESULTS. Check chrome.log — Chrome may not have launched.")
-    raise SystemExit(1)
-
-seen = set()
-for d in rows:
-    key = (d.get('ctx'), d.get('label'), d.get('href'))
-    if key in seen: continue
-    seen.add(key)
-    print(f"{str(d.get('ctx','?')):26} LM={str(d.get('typeofLanguageModel')):10} "
-          f"avail={str(d.get('availability')):13} "
-          f"pp={str(d.get('ppAllowsLanguageModel', d.get('ppAllows'))):6} "
-          f"gpu={str(d.get('gpuAdapter', d.get('hasWebGPU'))):18} "
-          f"secure={d.get('isSecureContext')}")
-    if d.get('href'): print(f"      {str(d['href'])[:88]}")
-    for k in ('adapterInfo','createError','availabilityError','gpuError','answer','createMs','promptMs'):
-        if d.get(k) is not None: print(f"      {k}: {d[k]}")
-
-print("\n---------------- WHAT THIS MEANS ----------------")
-ctxs = {d.get('ctx'): d for d in rows}
-
-off = ctxs.get('OFFSCREEN')
-if off:
-    lm_ok  = off.get('typeofLanguageModel') not in (None, 'undefined')
-    gpu_ok = bool(off.get('gpuAdapter') or off.get('hasWebGPU'))
-    print(f"OFFSCREEN   LanguageModel: {'YES' if lm_ok else 'NO'}    WebGPU: {'YES' if gpu_ok else 'NO'}")
-    if lm_ok and gpu_ok:
-        print("  -> ADR-009 confirmed. Build the model layer in the offscreen document.")
-    else:
-        print("  -> ADR-009 FAILS. The model host must move to an extension page or side panel.")
-        print("     Update docs/product/decisions.md before writing any engine code.")
-    info = str(off.get('adapterInfo', ''))
-    if 'swiftshader' in info.lower() or 'llvmpipe' in info.lower():
-        print("  -> WARNING: software renderer, not a real GPU. Not viable for WebLLM.")
-else:
-    print("OFFSCREEN   no result — the offscreen document did not report. Check chrome.log.")
-
-sw = ctxs.get('SERVICE_WORKER')
-if sw:
-    print(f"SW          LanguageModel: {sw.get('typeofLanguageModel')}  "
-          f"(expected 'undefined' — AIPromptAPIForWorkers is off with no flag)")
-
-cs = [d for d in rows if d.get('ctx') == 'CONTENT_ISOLATED']
-if len(cs) >= 2:
-    vals = {str(d.get('href','')).rstrip('/').split('/')[-1]:
-            d.get('ppAllowsLanguageModel', d.get('ppAllows')) for d in cs}
-    print(f"CONTENT     Permissions-Policy by page: {vals}")
-    if len(set(vals.values())) > 1:
-        print("  -> An isolated world DOES inherit the host page's Permissions-Policy.")
-        print("     LinkedIn holds a one-header kill switch over content-script inference.")
-    else:
-        print("  -> Isolated world appears immune to the host page's Permissions-Policy.")
-print()
-PY
-
-print "Full raw output: $ROOT/results.jsonl"
-print "Chrome stderr:   $ROOT/chrome.log"
+print "Raw:    $ROOT/results.jsonl"
+print "Chrome: $ROOT/chrome.log"
+print "Re-print this report any time:  python3 $ROOT/report.py"

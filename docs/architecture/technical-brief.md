@@ -34,6 +34,21 @@ Everything else in the decided set survives, with adjustments:
 
 ## 2. Execution-context map
 
+> **Measured 2026-09-25 (spike S2, partial).** The Permissions-Policy claim in §2.2 is no longer an
+> inference from a token table — it is observed behaviour on Chrome 153.0.8010.53. A page served
+> `Permissions-Policy: language-model=()` reported `document.featurePolicy.allowsFeature('language-model')
+> === false` and `LanguageModel.availability() === 'unavailable'`, where the same page without the
+> header reported `true` / `'downloadable'`. **A host site can switch the Prompt API off for its own
+> pages with one response header.** `language-model` appears in `featurePolicy.features()` alongside
+> `summarizer`, `translator`, `language-detector` and `on-device-speech-recognition`.
+> Cross-origin iframes are denied by default, as expected.
+>
+> Also measured: Nano reports `downloadable` on this machine — not yet installed, hardware qualifies.
+>
+> **Not yet measured:** every extension context (service worker, offscreen, extension page, content
+> script isolated world). Chrome silently ignores `--load-extension`, so the probe extension never
+> loaded. ADR-009 remains provisional until the offscreen row exists.
+
 ### 2.1 Definitive table
 
 | Context | Global | Origin of record | `LanguageModel` | WebGPU | DOM | Lifetime | User gesture |
