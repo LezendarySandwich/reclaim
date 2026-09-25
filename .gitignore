@@ -1,0 +1,51 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# build output
+dist/
+build/
+.output/
+.wxt/
+*.zip
+*.crx
+*.pem
+*.xpi
+
+# test & coverage
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# model weights — never commit these, they are downloaded at runtime
+*.wasm.bin
+*.gguf
+*.onnx
+models/cache/
+
+# local captures used as adapter fixtures are committed deliberately;
+# raw unredacted scrapes are not
+fixtures/raw/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# editor & OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
