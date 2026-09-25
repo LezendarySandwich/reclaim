@@ -56,9 +56,23 @@ try: print(socket.gethostbyname('$HOST'))
 except Exception as e: print('FAIL: '+str(e))")
 [[ "$resolved" == "127.0.0.1" ]] || fail "$HOST resolved to '$resolved', expected 127.0.0.1.\nIf offline, add to /etc/hosts:\n    127.0.0.1 $HOST cdn.other.localtest.me"
 
-if pgrep -x "Google Chrome" >/dev/null 2>&1; then
-  print -u2 "⚠ Chrome is already running. A live instance can swallow these URLs and drop every"
-  print -u2 "  command-line flag. Quit Chrome entirely if the probe reports nothing.\n"
+# HARD STOP, not a warning. If Chrome is already running, the URLs below can be handed to your
+# EXISTING window instead of the throwaway profile — and then the manual "Load unpacked" step
+# installs the probe into your REAL browser profile, where its service worker will keep retrying
+# POSTs to a report server that stops existing when this script ends.
+if pgrep -x "Google Chrome" >/dev/null 2>&1 && [[ "${1:-}" != "--i-know-chrome-is-running" ]]; then
+  fail "Chrome is already running — quit it completely (Cmd-Q) and rerun.
+
+  Why this is a hard stop and not a warning: a running Chrome can swallow these URLs into your
+  existing window and drop every command-line flag. You would then load the probe extension into
+  your REAL profile rather than the throwaway one. Its service worker keeps probing, and its
+  reports go to a server that only exists while this script runs — so you get repeated failing
+  requests, and chrome-extension://invalid/ once the extension is removed.
+
+  If you have already done that: open chrome://extensions in your normal Chrome and remove
+  \"PromptAPI Context Probe\".
+
+  To override anyway:  $0 --i-know-chrome-is-running"
 fi
 
 lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1 && \
