@@ -80,9 +80,72 @@ function readText(postEl: Element, profile: SelectorProfile): string {
   return (clone.textContent ?? '').replace(/[ \t]+/gu, ' ').replace(/\n{3,}/gu, '\n\n').trim()
 }
 
+/** Text that marks a block as "someone in your network interacted with this", not post content. */
+const SOCIAL_CONTEXT_TEXT =
+  /\b(commented|likes this|liked this|reposted|shared this|follows|celebrates|reacted)\b/iu
+
+/**
+ * Is this node inside the "X commented on this" banner?
+ *
+ * Structural selectors for that banner are unverified on the modern feed, so this also falls back
+ * to reading the text of the node's nearest few ancestors. Crude, but the failure it prevents —
+ * attributing a post to the person who commented on it — is bad enough to be worth a heuristic.
+ */
+function inSocialContext(node: Element, postEl: Element, profile: SelectorProfile): boolean {
+  for (const sel of profile.socialContext) {
+    try {
+      const banner = postEl.querySelector(sel)
+      if (banner && banner !== node && banner.contains(node)) return true
+    } catch {
+      // Bad config selector — fall through to the text check.
+    }
+  }
+
+  let ancestor: Element | null = node.parentElement
+  for (let depth = 0; depth < 4 && ancestor && ancestor !== postEl; depth++) {
+    const text = (ancestor.textContent ?? '').trim()
+    // Only a SHORT block can be a social-context banner. A long one is the post itself, which
+    // may legitimately contain the word "commented".
+    if (text.length > 0 && text.length < 120 && SOCIAL_CONTEXT_TEXT.test(text)) return true
+    ancestor = ancestor.parentElement
+  }
+  return false
+}
+
 function readAuthor(postEl: Element, profile: SelectorProfile): { name: string; urn: string } {
-  const link = queryFirst(postEl, profile.authorLink) as HTMLAnchorElement | null
-  const nameEl = queryFirst(postEl, profile.authorName)
+  // Take the first candidate that is NOT inside a social-context banner.
+  //
+  // On a "Igor Šlat commented on this" card the commenter's profile link comes first in document
+  // order, so the previous first-match approach credited the post to them. That value is the
+  // leaderboard's grouping key, so the bug did not merely mislabel a stub — it attributed
+  // somebody else's posting habits to the wrong person.
+  let link: HTMLAnchorElement | null = null
+  for (const sel of profile.authorLink) {
+    try {
+      for (const candidate of postEl.querySelectorAll(sel)) {
+        if (inSocialContext(candidate, postEl, profile)) continue
+        link = candidate as HTMLAnchorElement
+        break
+      }
+    } catch {
+      // Invalid selector from a remote config; try the next.
+    }
+    if (link) break
+  }
+
+  let nameEl: Element | null = null
+  for (const sel of profile.authorName) {
+    try {
+      for (const candidate of postEl.querySelectorAll(sel)) {
+        if (inSocialContext(candidate, postEl, profile)) continue
+        nameEl = candidate
+        break
+      }
+    } catch {
+      // As above.
+    }
+    if (nameEl) break
+  }
 
   const href = link?.getAttribute('href') ?? ''
   // Strip query and trailing slash so the same author is one identity across feed renders,
@@ -91,7 +154,14 @@ function readAuthor(postEl: Element, profile: SelectorProfile): { name: string; 
     ? href.split('?')[0]!.replace(/\/+$/u, '')
     : ''
 
-  const fromNode = (nameEl?.textContent ?? '').trim() || (link?.textContent ?? '').trim()
+  // An aria-label of the form "View Felipe Weber's profile" names the author directly and is
+  // more reliable than the link's own text, which often includes a degree badge or job title.
+  const ariaName = link?.getAttribute('aria-label')?.match(/^View\s+(.+?)[’']?s?\s+profile$/iu)?.[1]
+
+  const fromNode =
+    (ariaName ?? '').trim() ||
+    (nameEl?.textContent ?? '').trim() ||
+    (link?.textContent ?? '').trim()
 
   return {
     // Last resort: derive a readable name from the profile slug. LinkedIn's name markup varies

@@ -205,3 +205,32 @@ three prefixes and across three separately captured posts.
       pasted into a chat rather than captured markup.
 - [ ] The 20-locale label list is untested beyond German. If LinkedIn renders the label with
       surrounding punctuation or a bullet separator in some locales, exact line matching misses it.
+
+## Author misattribution on social-context cards — 2026-09-26
+
+Reported from a live feed: a post by Felipe Weber, surfaced because Igor Šlat had commented on
+it, was attributed to **Igor**.
+
+**This is the worst class of bug in this product.** `authorUrn` is the leaderboard's grouping
+key, so it did not merely mislabel a stub — it credited one person's posting habits to another,
+on a surface whose whole purpose is to say "this person posts a lot of slop".
+
+- [x] Cause: `readAuthor` took the FIRST `a[href*="/in/"]` in the post, and on a
+      "X commented on this" card the commenter's link precedes the author's in document order.
+- [x] Fix, in three layers because the exact markup is unverified:
+      1. Prefer `a[aria-label^="View "]` — the author's own actor-block link.
+      2. Skip any candidate inside a `socialContext` block.
+      3. Fall back to a text check on the nearest few ancestors for
+         "commented / likes this / reposted / follows", bounded to blocks under 120 characters
+         so a post that merely discusses commenting is not mistaken for a banner.
+- [x] Author name now prefers the `View X’s profile` aria-label, which is cleaner than the link
+      text (that often carries a degree badge or job title).
+- [x] Five tests, including the "post that talks about commenting" case.
+
+- [ ] **The markup is reconstructed, not captured.** The fixture was rebuilt from the rendered
+      text of the reported post, so the `social-proof-bar-key` selector and the exact aria-label
+      format are inferred. Worth capturing a real one.
+- [ ] Reposts are the untested sibling case: a repost has the reposter AND the original author,
+      and which one should own the post is a product question nobody has answered.
+- [ ] Any leaderboard rows already written under a wrong author are still wrong. There is no
+      migration, and the 90-day retention will eventually age them out.

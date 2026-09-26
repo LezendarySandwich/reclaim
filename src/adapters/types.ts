@@ -108,6 +108,13 @@ export interface SelectorProfile {
   bodyText: string[]
   /** Excluded from body extraction — "Alice likes this" would otherwise pollute model input. */
   excludeFromBody: string[]
+  /**
+   * The "X commented on this" banner above a post.
+   *
+   * Excluded from author extraction: the person named there is NOT the author, and attributing
+   * the post to them would credit the wrong human on a leaderboard.
+   */
+  socialContext: string[]
   seeMoreToggle: string[]
   media: string[]
   sponsored: string[]

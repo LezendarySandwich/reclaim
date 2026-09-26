@@ -5,6 +5,7 @@ import {
   modernPostHtml,
   realPromotedPostHtml,
   renderLegacyFeed,
+  socialContextPostHtml,
   renderModernFeed,
 } from './fixtures'
 import type { PostFixture } from './fixtures'
@@ -370,5 +371,59 @@ describe('promoted detection against REAL captured ad markup', () => {
     const posts = adapter.findPosts(adapter.findFeedRoot(document)!)
     const flags = posts.map((p) => adapter.extract(p)!.post.isPromoted)
     expect(flags).toEqual([true, false])
+  })
+})
+
+describe('author attribution on a "X commented" card', () => {
+  // Reported from a live feed: the stub named Igor Šlat, who commented, rather than Felipe
+  // Weber, who wrote it. The commenter's profile link comes FIRST in document order, and
+  // readAuthor took the first match. The leaderboard groups on this value, so the bug credited
+  // one person's posting habits to another — the worst class of error in an accusation surface.
+  it('attributes the post to the AUTHOR, not the commenter', () => {
+    renderModernFeed([socialContextPostHtml()])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    const post = adapter.extract(el)!.post
+    expect(post.authorName).toBe('Felipe Weber')
+    expect(post.authorUrn).toBe('/in/felipe-weber')
+  })
+
+  it('does not leak the commenter into the author URN', () => {
+    renderModernFeed([socialContextPostHtml({ commenterSlug: 'igor-slat' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.authorUrn).not.toContain('igor')
+  })
+
+  it('reads the name out of the "View X’s profile" label', () => {
+    renderModernFeed([socialContextPostHtml({ author: 'Priya Raman', authorSlug: 'priya-raman' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.authorName).toBe('Priya Raman')
+  })
+
+  it('still works on an ordinary post with no social context', () => {
+    renderModernFeed([modernPostHtml({ author: 'Alice Smith', href: '/in/alice-smith/' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    const post = adapter.extract(el)!.post
+    expect(post.authorName).toBe('Alice Smith')
+    expect(post.authorUrn).toBe('/in/alice-smith')
+  })
+
+  it('does not mistake a post that merely discusses commenting for a social-context card', () => {
+    // The text fallback only treats SHORT blocks as banners, so a post about comments is safe.
+    renderModernFeed([
+      modernPostHtml({
+        author: 'Alice Smith',
+        href: '/in/alice-smith/',
+        body:
+          'I commented on three posts this week and every single one of them turned into a ' +
+          'genuinely useful conversation, which is not what I expected from this platform.',
+      }),
+    ])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.authorName).toBe('Alice Smith')
   })
 })

@@ -55,7 +55,17 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
         'a[href*="/company/"]',
       ],
       // S4: /in/ 75%, /company/ 38%. Together they cover the feed.
-      authorLink: ['a[href*="/in/"]', 'a[href*="/company/"]'],
+      //
+      // ORDER IS LOAD-BEARING. A "X commented on this" card contains the commenter's profile
+      // link BEFORE the author's, so taking the first /in/ link attributes the post to the wrong
+      // person — and the leaderboard aggregates on exactly this value. The `View …'s profile`
+      // labelled link belongs to the post's own actor block, so it is tried first.
+      authorLink: [
+        'a[aria-label^="View "][href*="/in/"]',
+        'a[aria-label^="View "][href*="/company/"]',
+        'a[href*="/in/"]',
+        'a[href*="/company/"]',
+      ],
       // S4: 100% (8/8). The single most reliable selector on the whole page.
       bodyText: ['[data-testid="expandable-text-box"]'],
       // "Alice and 12 others like this" is not post content and would pollute every model input.
@@ -63,6 +73,14 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
         '[componentkey="social-proof-bar-key"]',
         '[componentkey="social-actions-key"]',
         '[data-testid="comments-container"]',
+      ],
+      // The "Igor Šlat commented on this" banner above a post. Excluded from author extraction
+      // because the person named there is NOT the author, and from body text for the same
+      // reason it pollutes the model input.
+      socialContext: [
+        '[componentkey="social-proof-bar-key"]',
+        '[data-testid="social-context"]',
+        '[componentkey*="socialContext"]',
       ],
       // S4: 88% (7/8), label "… more". The precise testid was learned from a console warning
       // LinkedIn emits about its own markup — they set aria-hidden="true" on this button while
@@ -105,6 +123,7 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
       authorLink: ['.update-components-actor__meta-link', 'a.app-aware-link[href*="/in/"]'],
       bodyText: ['.update-components-text', '.feed-shared-update-v2__description'],
       excludeFromBody: ['.social-details-social-counts', '.comments-comments-list'],
+      socialContext: ['.update-components-header', '.feed-shared-header'],
       seeMoreToggle: ['.feed-shared-inline-show-more-text__see-more-less-toggle'],
       media: ['.update-components-image img', 'video'],
       sponsored: ['.update-components-actor__sub-description'],
