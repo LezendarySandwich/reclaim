@@ -321,15 +321,46 @@ async function linkedinDomAudit() {
     rec.stamp = String(i);
     rec.el.setAttribute(STAMP, rec.stamp);
   });
-  const startY = window.scrollY;
-  const heightBefore = document.documentElement.scrollHeight;
+  // FIX (2026-09-26): the first run of this script scrolled `window` and reported
+  // scrollHeight 780 before AND after, i.e. the page never moved and the recycling verdict was
+  // meaningless. LinkedIn's modern build scrolls an inner container, not the document, so find
+  // the real scroller by walking up from the feed root looking for an actually-overflowing
+  // ancestor. Falls back to the window for the legacy feed.
+  const findScroller = (start) => {
+    let node = start;
+    while (node && node !== document.body && node !== document.documentElement) {
+      const style = getComputedStyle(node);
+      const scrolls = /auto|scroll|overlay/.test(style.overflowY);
+      if (scrolls && node.scrollHeight > node.clientHeight + 50) return node;
+      node = node.parentElement;
+    }
+    const doc = document.scrollingElement || document.documentElement;
+    return doc.scrollHeight > window.innerHeight + 50 ? doc : null;
+  };
+
+  const scroller = findScroller(identities[0]?.el ?? feedRoot) ||
+    document.scrollingElement || document.documentElement;
+  const usingWindow = scroller === document.scrollingElement || scroller === document.documentElement;
+
+  const readTop = () => (usingWindow ? window.scrollY : scroller.scrollTop);
+  const readHeight = () => scroller.scrollHeight;
+  const scrollDown = (px) => {
+    if (usingWindow) window.scrollBy(0, px);
+    else scroller.scrollTop += px;
+  };
+
+  const startY = readTop();
+  const heightBefore = readHeight();
 
   for (let i = 0; i < 6; i++) {
-    window.scrollBy(0, window.innerHeight * 1.5);
+    scrollDown(window.innerHeight * 1.5);
     await sleep(700);
   }
-  const heightAfterScroll = document.documentElement.scrollHeight;
-  window.scrollTo(0, startY);
+  const heightAfterScroll = readHeight();
+  const topAfterScroll = readTop();
+
+  if (usingWindow) window.scrollTo(0, startY);
+  else scroller.scrollTop = startY;
   await sleep(1500);
 
   let stillConnectedSameContent = 0;
@@ -363,12 +394,24 @@ async function linkedinDomAudit() {
     stampsPresentAfterScroll: stampedNow,
     scrollHeightBefore: heightBefore,
     scrollHeightAfterScroll: heightAfterScroll,
+    // Guard against the failure the first run hit silently: if nothing moved, the verdict below
+    // is meaningless and must not be believed.
+    scrollerDescription: usingWindow
+      ? 'window/document'
+      : `${scroller.tagName.toLowerCase()}${scroller.getAttribute('data-testid') ? '[data-testid=' + scroller.getAttribute('data-testid') + ']' : ''}`,
+    scrolledBy: topAfterScroll - startY,
+    scrollActuallyHappened: topAfterScroll - startY > 100 || heightAfterScroll > heightBefore,
     verdict:
-      recycledSameNodeNewContent > 0
-        ? 'RECYCLING: same DOM node reused for different content — you MUST key state by urn, not by node'
-        : detached > identities.length * 0.3
-          ? 'UNMOUNTING: nodes are destroyed/recreated (virtualized) — WeakMap on node is unsafe across scroll'
-          : 'STABLE: nodes persisted with their content across this scroll',
+      // Refuse to claim STABLE when the page never moved. The first run of this script reported
+      // STABLE with scrollHeight identical before and after, which read as a real answer and was
+      // not one — it had scrolled the window while LinkedIn scrolls an inner container.
+      !(topAfterScroll - startY > 100 || heightAfterScroll > heightBefore)
+        ? 'INCONCLUSIVE: the feed never actually scrolled, so nothing was tested. Check scrollerDescription.'
+        : recycledSameNodeNewContent > 0
+          ? 'RECYCLING: same DOM node reused for different content — you MUST key state by post id, not by node'
+          : detached > identities.length * 0.3
+            ? 'UNMOUNTING: nodes are destroyed/recreated (virtualized) — WeakMap on node is unsafe across scroll'
+            : 'STABLE: nodes persisted with their content across this scroll',
     recycleExamples,
   };
 

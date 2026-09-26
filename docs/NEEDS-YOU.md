@@ -6,10 +6,21 @@ Two things block real progress. Everything else is either done or buildable with
 
 ---
 
-## 1. Run spike S4 — the LinkedIn DOM audit
+## 1. Re-run S4 — the recycling question is still open
 
-**Blocks:** the adapter, and therefore anything you can actually see working. This is the single
-highest-value thing you can do.
+You already ran this once and it was enormously useful (results applied, three of my selectors
+were wrong). But **its recycling verdict was invalid**: it reported `STABLE` while `scrollHeight`
+was identical before and after, meaning the page never actually scrolled. LinkedIn's modern build
+scrolls an inner container and my script scrolled the window.
+
+**Fixed now** — it finds the real scroll container, reports `scrollerDescription` and
+`scrolledBy`, and refuses to claim `STABLE` if nothing moved (it says `INCONCLUSIVE` instead).
+
+Also still unanswered from the first run, and both cheap:
+- **Is the `componentkey` opaque id stable across reloads?** Reload the feed and check whether a
+  post that is still there kept its id. If it is per-render, cross-session history fragments.
+- **Sponsored detection is untested** — there were no promoted posts in the sample. Re-run when
+  your feed has ads in it.
 
 It's read-only, no extension involved, no server. Nothing like the mess S2 turned into.
 
@@ -122,7 +133,7 @@ behaviour, not a bug.
 
 ## Where the code actually is
 
-**22 commits. 289 tests passing, typecheck clean, builds for Chrome and Firefox.**
+**26 commits. 341 tests passing, typecheck clean, builds for Chrome and Firefox.**
 
 | Layer | State |
 |---|---|
@@ -131,11 +142,13 @@ behaviour, not a bug.
 | `src/detect/` — triage router | Done. Thresholds deliberately uncalibrated |
 | `src/storage/` — IndexedDB, aggregates, settings | Done |
 | `tests/invariants.test.ts` | Codebase-wide guards for the four non-negotiables |
-| `src/adapters/` — seam, selectors, identity | Foundations done. `adapter.ts` itself **blocked on S4** |
+| `src/adapters/linkedin/` | **Done** — S4-verified selectors, identity, extraction |
+| `src/content/watcher.ts` | **Done** — feed observer, triage gate, stub application |
 | `src/engines/` — Prompt API engine, prompt, registry | Done. Runs in the service worker (ADR-018). WebLLM deferred |
 | `src/core/` — scheduler + classify pipeline | Done. `CLASSIFY_BATCH` returns real verdicts |
 | `src/ui/stub.ts` — collapsed stub | Done, pending a real screen-reader pass |
-| Dashboard / popup / onboarding UI | Placeholders — **this is now the main gap** |
+| Dashboard + onboarding | **Done enough to use** — consent, permission request, model install, purge |
+| Dashboard history / leaderboard | Not built — needs persistence wired first |
 | Consent gate (ADR-020) | Done — gate, manifest, runtime registration. No onboarding UI yet, so nothing can *grant* consent |
 
 Run `pnpm verify` (build → build:firefox → typecheck → test) to see it all green.
