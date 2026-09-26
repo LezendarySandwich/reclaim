@@ -1,42 +1,41 @@
 import { browser } from 'wxt/browser'
 import { errorResponse, isRequestFor } from '../core/messages'
 import type { Response } from '../core/messages'
+import { gateState, mayReadPosts } from '../core/consent'
+import { hasConsent } from '../storage/settings'
 
 /**
- * Service worker — ROUTER ONLY.
+ * Service worker — router, consent gate, and (later) the Prompt API host.
  *
- * No inference (the Prompt API is gated off in workers behind `AIPromptAPIForWorkers`, which has
- * no chrome://flags entry) and no IndexedDB (the offscreen document is longer-lived and owns
- * writes, which keeps the SW-keepalive fight out of the storage design entirely).
+ * ADR-018 reversed the original plan: `LanguageModel` IS available here. Chromium force-enables
+ * `AIPromptAPIForWorkers` for any renderer launched with `--extension-process`, and the
+ * user-gesture check is skipped entirely when there is no Window — so this is the privileged
+ * context for the Prompt API, and an offscreen document (a Window that can never obtain user
+ * activation) is the handicapped one. The offscreen document is kept for WebLLM only.
  *
- * See docs/architecture/technical-brief.md §2.
+ * Still no IndexedDB here: the offscreen document outlives this worker, so it owns writes.
  */
 
-// Leading slash required: WXT types getURL() against the set of real public paths.
-const OFFSCREEN_PATH = '/offscreen.html' as const
+const CONTENT_SCRIPT_ID = 'linkedin-feed'
+const LINKEDIN_ORIGIN = 'https://www.linkedin.com/*'
+const LINKEDIN_FEED_MATCH = 'https://www.linkedin.com/feed/*'
+
+const OFFSCREEN_PATH = '/offscreen.html'
 
 let creating: Promise<void> | null = null
 
-/**
- * Race-free. Only one offscreen document may exist per extension, and concurrent content scripts
- * will both try to create it — `createDocument` throws if one already exists.
- */
+/** Race-free. Only one offscreen document may exist, and concurrent callers will both try. */
 async function ensureOffscreen(): Promise<void> {
-  // getContexts() is Chrome 116+. Deliberately not hasDocument(), which is Chrome 150+ and newer
-  // than our floor of 138.
   const existing = await browser.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
     documentUrls: [browser.runtime.getURL(OFFSCREEN_PATH)],
   })
   if (existing.length > 0) return
-
   if (creating) return creating
 
   const pending = browser.offscreen
     .createDocument({
       url: OFFSCREEN_PATH,
-      // There is no AI-specific Reason. WORKERS is the honest choice; the justification string is
-      // what Chrome Web Store review actually reads.
       reasons: ['WORKERS'],
       justification:
         'Hosts the on-device language model session used to classify feed posts locally.',
@@ -49,7 +48,56 @@ async function ensureOffscreen(): Promise<void> {
   return pending
 }
 
+async function hasHostPermission(): Promise<boolean> {
+  return browser.permissions.contains({ origins: [LINKEDIN_ORIGIN] })
+}
+
+/**
+ * Bring the registered content script in line with the gate.
+ *
+ * Reconciles rather than blindly registering: MV3 runtime registrations persist across browser
+ * restarts, so calling `registerContentScripts` again on startup throws a duplicate-id error.
+ * Idempotent by construction — safe to call from any event.
+ */
+async function reconcileContentScript(): Promise<void> {
+  const state = gateState({
+    hasConsent: await hasConsent(),
+    hasHostPermission: await hasHostPermission(),
+  })
+
+  const registered = await browser.scripting.getRegisteredContentScripts({
+    ids: [CONTENT_SCRIPT_ID],
+  })
+  const isRegistered = registered.length > 0
+
+  if (mayReadPosts(state)) {
+    if (isRegistered) return
+    await browser.scripting.registerContentScripts([
+      {
+        id: CONTENT_SCRIPT_ID,
+        matches: [LINKEDIN_FEED_MATCH],
+        js: ['content-scripts/linkedin.js'],
+        runAt: 'document_idle',
+        persistAcrossSessions: true,
+      },
+    ])
+    return
+  }
+
+  if (isRegistered) {
+    await browser.scripting.unregisterContentScripts({ ids: [CONTENT_SCRIPT_ID] })
+  }
+}
+
 export default defineBackground(() => {
+  // Reconcile on every lifecycle event that could change either condition. Cheap, and much more
+  // reliable than trying to enumerate the ways consent or a permission can change.
+  browser.runtime.onInstalled.addListener(() => void reconcileContentScript())
+  browser.runtime.onStartup.addListener(() => void reconcileContentScript())
+  browser.permissions.onAdded.addListener(() => void reconcileContentScript())
+  browser.permissions.onRemoved.addListener(() => void reconcileContentScript())
+  void reconcileContentScript()
+
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!isRequestFor(msg, 'background')) return false
 
@@ -58,16 +106,34 @@ export default defineBackground(() => {
       try {
         switch (msg.type) {
           case 'CLASSIFY_BATCH': {
+            // Defence in depth. The content script should not be running at all without consent,
+            // but a stale registration or a racing revoke must not result in a classification.
+            const state = gateState({
+              hasConsent: await hasConsent(),
+              hasHostPermission: await hasHostPermission(),
+            })
+            if (!mayReadPosts(state)) {
+              response = errorResponse(new Error(`Consent gate is ${state.status}`))
+              break
+            }
             await ensureOffscreen()
-            // TODO(002): forward to the offscreen document and return real verdicts.
-            // Until the model layer exists we fail open — an empty verdict list hides nothing.
+            // TODO(007): run the engine. Until it exists we fail open — an empty verdict list
+            // hides nothing.
             response = { ok: true, type: 'CLASSIFY_BATCH', verdicts: [] }
             break
           }
-          case 'GET_ENGINE_STATE':
-            // TODO(spike S1/S2): ask the offscreen document. Until then, report honestly.
-            response = { ok: true, type: 'GET_ENGINE_STATE', state: { status: 'needs_setup' } }
+          case 'GET_ENGINE_STATE': {
+            const state = gateState({
+              hasConsent: await hasConsent(),
+              hasHostPermission: await hasHostPermission(),
+            })
+            response = {
+              ok: true,
+              type: 'GET_ENGINE_STATE',
+              state: mayReadPosts(state) ? { status: 'needs_setup' } : { status: 'uninitialized' },
+            }
             break
+          }
           case 'INSTALL_MODEL':
             response = errorResponse(new Error('Model layer not implemented'))
             break
@@ -78,8 +144,7 @@ export default defineBackground(() => {
       sendResponse(response)
     })()
 
-    // MUST be a literal `true`. Promise-returning onMessage is Chrome 148+ and still rolling out
-    // gradually; our floor is 138.
+    // MUST be a literal `true`. Promise-returning onMessage is Chrome 148+ and our floor is 138.
     return true
   })
 })

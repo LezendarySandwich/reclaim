@@ -29,12 +29,34 @@ describe.runIf(chrome)('chrome manifest', () => {
     expect(chrome!.manifest_version).toBe(3)
   })
 
-  it('requests exactly the four justified permissions', () => {
-    expect(chrome!.permissions).toEqual(['offscreen', 'storage', 'alarms', 'webNavigation'])
+  it('requests exactly the five justified permissions', () => {
+    expect(chrome!.permissions).toEqual([
+      'offscreen',
+      'storage',
+      'alarms',
+      'webNavigation',
+      'scripting',
+    ])
   })
 
-  it('is scoped to LinkedIn only', () => {
-    expect(chrome!.host_permissions).toEqual(['https://www.linkedin.com/*'])
+  // ADR-020: access is requested during onboarding from a real user gesture, not granted at
+  // install, because the July 2026 CWS user-data policy removed the exemption we relied on.
+  it('has NO static host_permissions', () => {
+    expect(chrome!.host_permissions).toBeUndefined()
+  })
+
+  it('requests LinkedIn as an optional host permission instead', () => {
+    expect(chrome!.optional_host_permissions).toEqual(['https://www.linkedin.com/*'])
+  })
+
+  it('has NO static content_scripts — the SW registers at runtime after consent', () => {
+    // WXT derives host_permissions from content-script matches, so a regression here would
+    // silently reinstate the install-time grant too. The hook in wxt.config.ts strips it.
+    expect(chrome!.content_scripts).toBeUndefined()
+  })
+
+  it('requests scripting, needed for runtime registration', () => {
+    expect(chrome!.permissions).toContain('scripting')
   })
 
   it.each(['tabs', 'activeTab', 'cookies', 'downloads', 'unlimitedStorage', '<all_urls>'])(
@@ -43,6 +65,7 @@ describe.runIf(chrome)('chrome manifest', () => {
       const all = [
         ...((chrome!.permissions as string[] | undefined) ?? []),
         ...((chrome!.host_permissions as string[] | undefined) ?? []),
+        ...((chrome!.optional_host_permissions as string[] | undefined) ?? []),
       ]
       expect(all).not.toContain(perm)
     },

@@ -110,7 +110,7 @@ during onboarding rather than at install. **Not yet implemented** — see below.
 
 ## Where the code actually is
 
-**9 commits of docs, 4 of code. 175 tests passing, typecheck clean, builds for Chrome and Firefox.**
+**Docs and code across 14 commits. 188 tests passing, typecheck clean, builds for Chrome and Firefox.**
 
 | Layer | State |
 |---|---|
@@ -122,7 +122,7 @@ during onboarding rather than at install. **Not yet implemented** — see below.
 | `src/adapters/linkedin/` | **Empty — blocked on S4** |
 | `src/engines/` | **Empty — blocked on S2** |
 | Dashboard / popup UI | Placeholders |
-| Consent gate (ADR-020) | **Not implemented** |
+| Consent gate (ADR-020) | Done — gate, manifest, runtime registration. No onboarding UI yet, so nothing can *grant* consent |
 
 Run `pnpm verify` (build → build:firefox → typecheck → test) to see it all green.
 
@@ -142,8 +142,7 @@ hand-written samples — it pins behaviour we've committed to, not accuracy. Don
 
 In order:
 
-1. Consent gate (ADR-020) — dynamic content-script registration, optional host permission,
-   first-run disclosure. Manifest change.
+1. ~~Consent gate~~ — done.
 2. `SiteAdapter` interface and the LinkedIn adapter skeleton, against the candidate selectors the
    research found (`[data-testid="mainFeed"]`, `componentkey^="expandedFeedType_"`,
    `[data-testid="expandable-text-box"]`) — structured so your S4 results drop straight in.

@@ -16,19 +16,39 @@ export default defineConfig({
     minimum_chrome_version: '138',
 
     permissions: [
-      'offscreen', // hosts the on-device model — the only context where it can run
-      'storage', // settings only; post history lives in IndexedDB
+      'offscreen', // hosts the WebLLM engine; the Prompt API runs in the SW (ADR-018)
+      'storage', // settings and consent only; post history lives in IndexedDB
       'alarms', // retention purge and the model-drift canary
       'webNavigation', // LinkedIn is an SPA; content scripts need re-attach on route change
+      'scripting', // register the content script at runtime, after consent (ADR-020)
     ],
 
-    host_permissions: ['https://www.linkedin.com/*'],
-
-    // Any WebLLM CDN origin is requested at upgrade-install time, never bundled into the base
-    // grant — a model download the user did not ask for should not be pre-authorised.
-    optional_host_permissions: [],
+    // NO static `host_permissions` and NO static `content_scripts`. Both are deliberate: the
+    // July 2026 Chrome Web Store user-data policy removed the exemption that let us read post
+    // text before obtaining consent, so access is requested during onboarding from a real user
+    // gesture and the content script is registered only once consent exists. See ADR-020.
+    optional_host_permissions: [
+      'https://www.linkedin.com/*',
+      // A WebLLM CDN origin will be added here when that tier ships — requested at
+      // model-install time, never pre-authorised.
+    ],
 
     options_page: 'dashboard.html',
+  },
+
+  hooks: {
+    /**
+     * WXT derives `host_permissions` from every content script's `matches`, including
+     * runtime-registered ones — so declaring `matches` on the LinkedIn script silently puts
+     * `https://www.linkedin.com/feed/*` back into the base grant and undoes ADR-020.
+     *
+     * We need `matches` on the entrypoint (the service worker reads it when registering at
+     * runtime), so strip the derived permission here instead. `tests/manifest.test.ts` asserts
+     * the result, because this is exactly the sort of thing a WXT upgrade could quietly reinstate.
+     */
+    'build:manifestGenerated': (_wxt, manifest) => {
+      delete (manifest as { host_permissions?: string[] }).host_permissions
+    },
   },
 })
 
