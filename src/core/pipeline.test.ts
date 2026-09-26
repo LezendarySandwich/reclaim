@@ -21,7 +21,7 @@ function post(id: string, text = 'Some post text that is long enough.'): Post {
 }
 
 function triaged(id: string, heuristics: TriagedPost['heuristics'] = {}): TriagedPost {
-  return { post: post(id), heuristics }
+  return { post: post(id), heuristics, band: 'ambiguous' }
 }
 
 function fakeEngine(scores: Record<string, number> | (() => never)): ModelEngine {

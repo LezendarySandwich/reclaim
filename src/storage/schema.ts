@@ -2,7 +2,7 @@
  * IndexedDB schema. Pure declarations — no platform calls, so this is importable anywhere.
  */
 
-import type { Axis, VerdictAction } from '../core/types'
+import type { Axis, TriageBand, VerdictAction } from '../core/types'
 
 export const DB_NAME = 'reclaim'
 export const DB_VERSION = 1
@@ -38,6 +38,11 @@ export interface StoredVerdict {
   signals: Partial<Record<Axis, { score: number; source: string }>>
   engineId: string
   rulesVersion: string
+  /**
+   * What the triage router said before the model looked. Enables the agreement panel.
+   * Absent on rows written before this field existed.
+   */
+  triageBand?: TriageBand
   /** Epoch ms. Passed in by the caller — this module never reads the clock, so it stays pure. */
   at: number
 }
@@ -72,6 +77,7 @@ export function createStores(db: IDBDatabase): void {
     s.createIndex('at', 'at') // retention purge
     s.createIndex('authorUrn', 'authorUrn') // per-creator drill-down
     s.createIndex('action', 'action') // "what did it hide" timeline
+    s.createIndex('triageBand', 'triageBand') // router-vs-model agreement
   }
   if (!db.objectStoreNames.contains(STORE.authors)) {
     const s = db.createObjectStore(STORE.authors, { keyPath: 'authorUrn' })

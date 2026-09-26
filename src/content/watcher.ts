@@ -190,7 +190,11 @@ export class FeedWatcher {
 
           batch.push({
             post: extracted.post,
-            heuristics: { engagement_bait: Math.round(triage.bait * 100), ai_written: Math.round(triage.ai * 100) },
+            heuristics: {
+              engagement_bait: Math.round(triage.bait * 100),
+              ai_written: Math.round(triage.ai * 100),
+            },
+            band: triage.band,
           })
         }
 

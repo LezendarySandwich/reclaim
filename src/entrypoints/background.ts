@@ -3,6 +3,7 @@ import { errorResponse, isRequestFor } from '../core/messages'
 import type { Response } from '../core/messages'
 import { gateState, mayReadPosts } from '../core/consent'
 import { hasConsent, loadSettings } from '../storage/settings'
+import { purgeOlderThan, recordVerdict } from '../storage/db'
 import { InferenceScheduler, classifyBatch } from '../core/pipeline'
 import { GeminiNanoEngine } from '../engines/gemini-nano'
 import { PROMPT_VERSION } from '../engines/prompt'
@@ -167,6 +168,18 @@ export default defineBackground(() => {
   // Passive probe on wake. Never downloads — that is `installEngine`, behind an explicit click.
   void probeEngine()
 
+  // Retention. Post excerpts are other people's writing sitting on the user's disk, so the
+  // window has to be enforced rather than merely documented (ADR-020).
+  browser.alarms.create('retention-purge', { periodInMinutes: 60 * 12 })
+  browser.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== 'retention-purge') return
+    void (async () => {
+      const settings = await loadSettings()
+      const cutoff = Date.now() - settings.retentionDays * 24 * 60 * 60 * 1000
+      await purgeOlderThan(cutoff).catch(() => undefined)
+    })()
+  })
+
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!isRequestFor(msg, 'background')) return false
 
@@ -196,7 +209,27 @@ export default defineBackground(() => {
               scheduler,
             })
 
+            // Respond first, persist after. The content script is waiting to render, and a
+            // storage hiccup must not delay — or worse, fail — a classification it already has.
             response = { ok: true, type: 'CLASSIFY_BATCH', verdicts: classified.map((c) => c.verdict) }
+
+            const at = Date.now()
+            void Promise.all(
+              classified.map((c) =>
+                recordVerdict({
+                  verdict: c.verdict,
+                  cacheKey: c.cacheKey,
+                  authorUrn: c.source.post.authorUrn,
+                  authorName: c.source.post.authorName,
+                  text: c.source.post.text,
+                  triageBand: c.source.band,
+                  at,
+                }),
+              ),
+            ).catch(() => {
+              // Storage is a dashboard nicety, never a gate on filtering. Losing a row costs a
+              // history entry; blocking on it would cost the user their feed.
+            })
             break
           }
           case 'GET_ENGINE_STATE': {

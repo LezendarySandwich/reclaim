@@ -1,9 +1,17 @@
 import { browser } from 'wxt/browser'
 import './style.css'
 import { GATE_COPY, gateState, mayReadPosts } from '../../core/consent'
-import { grantConsent, hasConsent, revokeConsent } from '../../storage/settings'
-import { purgeAll } from '../../storage/db'
+import { grantConsent, hasConsent, loadSettings, revokeConsent } from '../../storage/settings'
+import { purgeAll, putLabel } from '../../storage/db'
 import { MODELS, recommendModel } from '../../engines/registry'
+import {
+  authorsPanel,
+  axisPanel,
+  historyPanel,
+  loadPanelData,
+  overviewPanel,
+  routerPanel,
+} from './panels'
 import type { MachineSpecs } from '../../engines/types'
 import type { Request, Response } from '../../core/messages'
 import type { EngineState } from '../../core/types'
@@ -346,6 +354,42 @@ async function render(): Promise<void> {
   })
 
   data.append(el('div', { className: 'actions' }, [purge, revoke]))
+
+  // ---- Metrics -------------------------------------------------------------------------------
+  // Rendered before the data section so the interesting part is above the destructive buttons.
+  try {
+    const [panelData, settings] = await Promise.all([loadPanelData(Date.now()), loadSettings()])
+    root.append(
+      overviewPanel(panelData),
+      axisPanel(panelData, settings),
+      routerPanel(panelData, settings),
+      historyPanel(panelData, (row) => {
+        // Disagreement is recorded per axis. For ai_written this is an "annoyance" label and
+        // must not feed threshold tuning — see ADR-019 and metrics.usableForTuning.
+        for (const axis of row.triggeredBy) {
+          void putLabel({
+            postId: row.postId,
+            axis,
+            userSays: false,
+            verdictAtTime: row.signals[axis]?.score ?? row.topScore,
+            at: Date.now(),
+          })
+        }
+      }),
+      authorsPanel(panelData),
+    )
+  } catch (e) {
+    root.append(
+      el('section', {}, [
+        el('h2', { textContent: 'Metrics unavailable' }),
+        el('p', {
+          className: 'muted',
+          textContent: `Could not read local history: ${e instanceof Error ? e.message : String(e)}`,
+        }),
+      ]),
+    )
+  }
+
   root.append(data)
 
   if (engineState.status === 'downloading' || engineState.status === 'checking') {

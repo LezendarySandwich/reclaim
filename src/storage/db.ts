@@ -13,7 +13,7 @@
 
 import { DB_NAME, DB_VERSION, STORE, createStores, toExcerpt } from './schema'
 import type { AuthorAggregate, StoredLabel, StoredVerdict } from './schema'
-import type { Axis, Verdict } from '../core/types'
+import type { Axis, TriageBand, Verdict } from '../core/types'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -83,6 +83,8 @@ export interface RecordVerdictInput {
   authorUrn: string
   authorName: string
   text: string
+  /** What the router decided, for the agreement panel. */
+  triageBand?: TriageBand
   /** Epoch ms. Injected rather than read here, so callers control time and tests stay deterministic. */
   at: number
 }
@@ -113,6 +115,7 @@ export async function recordVerdict(input: RecordVerdictInput): Promise<void> {
     signals: verdict.signals as StoredVerdict['signals'],
     engineId: verdict.engineId,
     rulesVersion: verdict.rulesVersion,
+    ...(input.triageBand ? { triageBand: input.triageBand } : {}),
     at,
   }
 

@@ -6,7 +6,7 @@
  * side panel, only the router changes — see technical-brief.md §2.3.
  */
 
-import type { Axis, EngineState, Post, Verdict } from './types'
+import type { Axis, EngineState, Post, TriageBand, Verdict } from './types'
 
 /**
  * A post plus what the in-tab triage router already worked out about it.
@@ -19,6 +19,12 @@ import type { Axis, EngineState, Post, Verdict } from './types'
 export interface TriagedPost {
   post: Post
   heuristics: Partial<Record<Axis, number>>
+  /**
+   * What the router decided. Recorded so the dashboard can show router-vs-model agreement, which
+   * is the only honest version of "what detected this" — heuristics never hide, so a
+   * detector breakdown would read 100% model and say nothing.
+   */
+  band: TriageBand
 }
 
 /** Discriminator for broadcast messages, so contexts ignore traffic meant for others. */
