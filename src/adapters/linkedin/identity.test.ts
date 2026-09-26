@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deriveIdentity, extractUrn, isDurable } from './identity'
+import { deriveIdentity, extractComponentKeyId, extractUrn, isDurable } from './identity'
 
 describe('extractUrn', () => {
   it.each([
@@ -106,6 +106,71 @@ describe('isDurable', () => {
   it('treats composite ids as not durable', () => {
     // Allowed in history — excluding them would mean the modern feed collects nothing — but the
     // dashboard must not present a tally built on them as more certain than it is.
+    expect(isDurable('composite')).toBe(false)
+  })
+})
+
+describe('componentkey identity — the modern feed’s only per-post id (S4)', () => {
+  const REAL = 'expanded7cdbt_jwDmDtd5s0G2glmqfjUhVmI_JvbKvFl2n10wQFeedType_MAIN_FEED_RELEVANCE'
+
+  it('extracts the opaque id from a real captured componentkey', () => {
+    expect(extractComponentKeyId(REAL)).toBe('ck:7cdbt_jwDmDtd5s0G2glmqfjUhVmI_JvbKvFl2n10wQ')
+  })
+
+  it('handles the recent-feed variant too', () => {
+    expect(extractComponentKeyId('expandedABCDEFGHIJKLMNOPQRFeedType_MAIN_FEED_RECENT')).toBe(
+      'ck:ABCDEFGHIJKLMNOPQR',
+    )
+  })
+
+  it('REJECTS shared template keys — the collision trap prior art fell into', () => {
+    // A prior-art repo hashes componentkey blindly; values like `body-key` are identical on every
+    // post, so every post on the page would share an id.
+    for (const key of ['body-key', 'author-name-key', 'post-inner-key', 'social-proof-bar-key']) {
+      expect(extractComponentKeyId(key)).toBeNull()
+    }
+  })
+
+  it('rejects a key with too short an id to be real', () => {
+    expect(extractComponentKeyId('expandedXFeedType_MAIN_FEED')).toBeNull()
+  })
+
+  it.each([null, undefined, '', 'nonsense'])('returns null for %s', (v) => {
+    expect(extractComponentKeyId(v)).toBeNull()
+  })
+
+  it('is preferred over a composite hash', () => {
+    const got = deriveIdentity({
+      urnCandidates: [],
+      componentKey: REAL,
+      authorUrn: 'urn:li:person:alice',
+      text: 'Some text',
+    })
+    expect(got?.strategy).toBe('componentkey')
+  })
+
+  it('still yields to a real URN if one ever appears', () => {
+    const got = deriveIdentity({
+      urnCandidates: ['urn:li:activity:999'],
+      componentKey: REAL,
+      authorUrn: 'urn:li:person:alice',
+      text: 'Some text',
+    })
+    expect(got?.strategy).toBe('urn')
+  })
+
+  it('falls through to composite when the key is a template key', () => {
+    const got = deriveIdentity({
+      urnCandidates: [],
+      componentKey: 'body-key',
+      authorUrn: 'urn:li:person:alice',
+      text: 'Some text',
+    })
+    expect(got?.strategy).toBe('composite')
+  })
+
+  it('counts as durable, unlike a composite hash', () => {
+    expect(isDurable('componentkey')).toBe(true)
     expect(isDurable('composite')).toBe(false)
   })
 })

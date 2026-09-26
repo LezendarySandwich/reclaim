@@ -8,7 +8,7 @@ Living. Tick on completion, **append on discovery**. See `../../../AGENTS.md`.
 - [x] `src/adapters/linkedin/selectors.ts` — bundled candidate profiles + 20-locale Promoted labels
 - [x] `src/adapters/linkedin/identity.ts` — URN → permalink → composite derivation
 - [x] `src/adapters/linkedin/identity.test.ts`
-- [ ] `src/adapters/linkedin/adapter.ts` — **blocked on S4**
+- [ ] `src/adapters/linkedin/adapter.ts` — S4 has landed; no longer blocked
 - [ ] Text extraction hygiene (exclude comments and social proof, `<br>` → `\n`, expand see-more
       from a clone without clicking)
 - [ ] Feed observer: IntersectionObserver at `rootMargin: '1500px 0px'` as the triage gate,
@@ -18,6 +18,7 @@ Living. Tick on completion, **append on discovery**. See `../../../AGENTS.md`.
 
 ## Verification
 
+- [x] Selectors validated against a live feed by S4 (2026-09-26)
 - [ ] Extraction tested against captured fixtures, not a live site
 - [ ] `pnpm verify` green
 
@@ -54,3 +55,58 @@ _Append here. Strike through with a reason rather than deleting._
 - [ ] `SiteAdapter.mountStub` takes an `onExpand` callback, which means the adapter owns stub DOM.
       That may belong in a separate UI module instead — decide when the stub gets a real design,
       especially given the accessibility questions (brief R13) are entirely unresearched.
+
+## S4 results — 2026-09-26
+
+Raw output in `s4-results.json`. Account is on the **modern React/SDUI feed**
+(`body[data-rehydrated]`, `[data-testid="mainFeed"]`, no Ember). 8 posts sampled.
+
+**Three of my candidate selectors scored 0% and were wrong:**
+
+| Candidate | Why it failed |
+|---|---|
+| `div[componentkey^="expandedFeedType_"]` | The key is `expanded` + **43-char opaque id** + `FeedType_<VARIANT>`. I assumed the two parts were adjacent. |
+| `div[componentkey="post-inner-key"]` | No such key on this build |
+| `p[componentkey="body-key"]` | Likewise |
+
+**What actually works:**
+
+| Field | Selector | Hit rate |
+|---|---|---|
+| Feed root | `[data-testid="mainFeed"]` | 1 match |
+| Post | `div[componentkey*="FeedType_MAIN_FEED"]` | 8/8 after dropping nested |
+| Body text | `[data-testid="expandable-text-box"]` | **100%** |
+| See-more | `[data-testid="expandable-text-box"] button` | 88% ("… more") |
+| Author name | `a[href*="/in/"] span[aria-hidden="true"]` | 75% — misses company posts |
+| Author link | `a[href*="/in/"]` + `a[href*="/company/"]` | 75% + 38% |
+| Control menu | `button[aria-label*="control menu" i]` | 100% |
+
+**Identity is solved, better than expected.** No `data-urn`, no `data-id`, no permalink anywhere
+(0/8 on all of them) — but `componentkey` is on 8/8 post roots and **unique per post**:
+`expanded7cdbt_jwDmDtd5s0G2glmqfjUhVmI_JvbKvFl2n10wQFeedType_MAIN_FEED_RELEVANCE`. Added a
+`componentkey` strategy ranked above composite hashing, with a minimum-id-length guard so shared
+template keys (`body-key`) cannot collide the way prior art's does.
+
+- [ ] **Is the `componentkey` opaque id stable ACROSS RELOADS?** Unverified, and it matters: if it
+      is per-render, cross-session history silently fragments and every post looks new on every
+      visit. Cheap to check — reload the feed and diff the ids for a post that is still there.
+
+**Two fields could not be tested:**
+
+- [ ] **Sponsored/promoted — 0/8 on every selector, and 0 by text match.** There were simply no
+      promoted posts in the sample. UNTESTED, not disproven. Re-run on a feed that has ads.
+- [ ] **No `<time>` element at all** (0/8 on `time[datetime]`, `time`, and the legacy class). The
+      composite identity strategy uses a timestamp to disambiguate reposts of identical text, and
+      on this build it will not have one. Find where the relative age ("2h") actually lives.
+
+**The recycling verdict is NOT trustworthy.**
+
+- [ ] It reported `STABLE: nodes persisted with their content`, but
+      `scrollHeightBefore === scrollHeightAfterScroll === 780`. **The page never actually
+      scrolled.** 780px is far too short for a real feed, which means LinkedIn's modern build
+      scrolls an inner container rather than `document.documentElement`, and the audit scrolled
+      the wrong element. So we still do not know whether nodes get recycled.
+      **Consequence for the adapter: do NOT key per-post state on the element.** Use the derived
+      post id. That is correct under either answer, so this does not block `adapter.ts` — but the
+      audit script needs fixing before the answer is worth having.
+- [ ] Only 8 posts were in the DOM. Everything above is a small sample.

@@ -17,9 +17,25 @@
 export type IdentityStrategy =
   /** A real activity URN from the DOM. Legacy feed only. Strongest. */
   | 'urn'
-  /** Parsed out of the post's permalink. Strong, but the link is not always rendered. */
+  /** Parsed out of the post's permalink. S4 found none rendered on the modern feed. */
   | 'permalink'
-  /** Author + normalised text + timestamp. Weakest — survives re-render, not an edit. */
+  /**
+   * The opaque per-post id embedded in the modern feed's `componentkey`.
+   *
+   * S4 (2026-09-26) found `componentkey` on 8/8 post roots, each distinct, in the shape
+   * `expanded<43-char-id>FeedType_MAIN_FEED_RELEVANCE`. This is the ONLY per-post identifier on
+   * the modern feed — there is no `data-urn`, no `data-id`, and no permalink.
+   *
+   * Note the trap the research flagged: most `componentkey` values on the page ARE shared
+   * template keys (`body-key`, `author-name-key`), and a prior-art project hashes those blindly
+   * and collides across every post. This strategy only reads the key on the POST ROOT, and only
+   * when it matches the expected shape.
+   *
+   * Cross-reload stability is UNVERIFIED — see the checklist. Treated as durable for now because
+   * the alternative (composite hashing) is strictly weaker.
+   */
+  | 'componentkey'
+  /** Author + normalised text. Weakest — survives re-render, not an edit. */
   | 'composite'
 
 export interface PostIdentity {
@@ -28,6 +44,15 @@ export interface PostIdentity {
 }
 
 const ACTIVITY_URN = /urn:li:(?:activity|ugcPost|share):(\d+)/u
+
+/**
+ * `expanded<opaque id>FeedType_<VARIANT>` on the modern feed's post roots.
+ *
+ * The original candidate selector assumed `componentkey` STARTED with `expandedFeedType_`; S4
+ * showed a 43-character opaque id sits between the two, which is the whole reason that selector
+ * matched nothing. Requiring a minimum length keeps shared template keys out.
+ */
+const COMPONENT_KEY = /^expanded(.{16,})FeedType_/u
 
 /** FNV-1a. A cache key, not a security boundary — see src/core/cache.ts for why not SHA. */
 function hash(s: string): string {
@@ -46,14 +71,28 @@ export function extractUrn(value: string | null | undefined): string | null {
   return m ? `activity:${m[1]}` : null
 }
 
+/** Extract the per-post id from a modern-feed `componentkey`, or null if it is a template key. */
+export function extractComponentKeyId(value: string | null | undefined): string | null {
+  if (!value) return null
+  const m = COMPONENT_KEY.exec(value)
+  return m?.[1] ? `ck:${m[1]}` : null
+}
+
 export interface IdentityInput {
   /** Attribute values worth scanning for a URN, in preference order. */
   urnCandidates: ReadonlyArray<string | null | undefined>
-  /** href of the post permalink, if one is rendered. */
+  /** href of the post permalink, if one is rendered. S4: none are, on the modern feed. */
   permalink?: string | null
+  /** `componentkey` from the POST ROOT only — never a descendant's template key. */
+  componentKey?: string | null
   authorUrn: string
   text: string
-  /** Post timestamp as displayed ("2h", "3d"). Coarse, but it disambiguates reposts. */
+  /**
+   * Post timestamp as displayed ("2h", "3d").
+   *
+   * S4 found NO `<time>` element and no timestamp selector that matched, so on the modern feed
+   * this is usually absent and composite ids cannot use it to disambiguate reposts.
+   */
   timestamp?: string | null
 }
 
@@ -73,6 +112,9 @@ export function deriveIdentity(input: IdentityInput): PostIdentity | null {
   const fromLink = extractUrn(input.permalink)
   if (fromLink) return { id: fromLink, strategy: 'permalink' }
 
+  const fromKey = extractComponentKeyId(input.componentKey)
+  if (fromKey) return { id: fromKey, strategy: 'componentkey' }
+
   const text = input.text.replace(/\s+/gu, ' ').trim()
   if (!text) return null
 
@@ -88,6 +130,11 @@ export function deriveIdentity(input: IdentityInput): PostIdentity | null {
  * Composite ids are deliberately allowed — excluding them would mean the modern feed collects no
  * history at all, which is worse. But they are the weakest link in the leaderboard's evidence,
  * and the dashboard should not present a creator tally as more certain than its ids are.
+ *
+ * `componentkey` counts as durable on the strength of S4 showing it unique per post, but its
+ * stability ACROSS RELOADS is unverified. If it turns out to be per-render, cross-session history
+ * silently fragments — every post looks new on every visit — so that is worth measuring before
+ * the leaderboard ships.
  */
 export function isDurable(strategy: IdentityStrategy): boolean {
   return strategy !== 'composite'

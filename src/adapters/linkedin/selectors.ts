@@ -1,10 +1,18 @@
 /**
  * LinkedIn selector profiles — the bundled fallback set (ADR-023).
  *
- * PROVENANCE: these are CANDIDATES from the research pass, converged on by four independent
- * open-source projects (see docs/architecture/technical-brief-addendum.md §3). They have NOT been
- * validated against a live logged-in feed. Spike S4 does that, and its results should replace
- * anything here that turns out to be wrong.
+ * PROVENANCE: the `modern` profile is now VERIFIED against a live logged-in feed by spike S4 on
+ * 2026-09-26 (raw output in docs/features/006-linkedin-adapter/s4-results.json). Hit rates are
+ * noted per field. The `legacy` profile remains UNVERIFIED candidates — that account was served
+ * the modern feed, so nothing exercised the Ember path.
+ *
+ * Three of the original research candidates scored 0% and are kept below as explicit
+ * anti-selectors, because they came from four independent projects and someone will otherwise
+ * reintroduce them:
+ *   div[componentkey^="expandedFeedType_"]  — componentkey is `expanded<id>FeedType_<VARIANT>`,
+ *                                             with an opaque 43-char id in the middle
+ *   div[componentkey="post-inner-key"]      — no such key exists on this build
+ *   p[componentkey="body-key"]              — likewise
  *
  * TWO RULES, both learned the hard way by other projects:
  *
@@ -27,29 +35,50 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
       // both are live simultaneously (today's AdGuard build still ships rules for both).
       name: 'modern',
       detect: 'body[data-rehydrated], [data-testid="mainFeed"]',
-      feedRoot: ['[data-testid="mainFeed"]', 'main [role="feed"]', 'main'],
+      // S4: 1 match. Verified.
+      feedRoot: ['[data-testid="mainFeed"]', 'main [role="list"]', 'main'],
+      // S4: `div[componentkey*="FeedType_MAIN_FEED"]` gave 27 raw -> 8 after dropping nested,
+      // 8/8 looking like posts. `[role="listitem"]` gave 11 raw of which 8 were posts, so it
+      // needs filtering and is the weaker fallback.
       post: [
-        'div[componentkey^="expandedFeedType_"][role="listitem"]',
-        'div[componentkey^="urn:li:activity"]',
+        'div[componentkey*="FeedType_MAIN_FEED"]',
+        'div[componentkey*="FeedType_"]',
         '[role="listitem"]',
       ],
-      postContent: ['div[componentkey="post-inner-key"]'],
-      authorName: ['[componentkey="author-name-key"]', '[data-testid="post-author-name"]'],
+      // No inner content wrapper exists on this build — the post root IS the container.
+      postContent: [],
+      // S4: 75% (6/8). The two misses are company posts, covered by the authorLink chain.
+      authorName: [
+        'a[href*="/in/"] span[aria-hidden="true"]',
+        'a[href*="/company/"] span[aria-hidden="true"]',
+        'a[href*="/in/"]',
+        'a[href*="/company/"]',
+      ],
+      // S4: /in/ 75%, /company/ 38%. Together they cover the feed.
       authorLink: ['a[href*="/in/"]', 'a[href*="/company/"]'],
-      bodyText: ['[data-testid="expandable-text-box"]', '[componentkey="body-key"]'],
+      // S4: 100% (8/8). The single most reliable selector on the whole page.
+      bodyText: ['[data-testid="expandable-text-box"]'],
       // "Alice and 12 others like this" is not post content and would pollute every model input.
       excludeFromBody: [
         '[componentkey="social-proof-bar-key"]',
         '[componentkey="social-actions-key"]',
         '[data-testid="comments-container"]',
       ],
-      seeMoreToggle: ['button[aria-label*="more"]', '.see-more', '[data-testid="see-more"]'],
+      // S4: 88% (7/8), label "… more".
+      seeMoreToggle: ['[data-testid="expandable-text-box"] button', 'button[aria-label*="more" i]'],
+      // S4: a bare `img` hit 8/8 but that includes avatars and reaction icons, so it is useless
+      // as a "has media" signal. Scoped to the CDN path instead — UNVERIFIED, because no post in
+      // the sample had an attached image.
       media: ['img[src*="media.licdn.com"]', 'video'],
+      // S4: every sponsored candidate scored 0/8, and `promotedByText` was also 0 — there were
+      // simply no promoted posts in the sample. UNTESTED, not disproven. Do not delete.
       sponsored: [
         '[componentkey="sponsored-indicator-key"]',
         '[data-sponsored-tracking-url]',
         '[data-view-tracking-scope*="SPONSORED"]',
       ],
+      // S4: 0/8. No post permalink is rendered in the feed at all, so the `permalink` identity
+      // strategy is unavailable on this build without opening each post's control menu.
       permalink: ['a[href*="/feed/update/"]'],
     },
     {
