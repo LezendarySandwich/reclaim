@@ -286,3 +286,38 @@ body text. Three earlier fixes had aimed at the selectors because the symptom lo
 - [ ] `#resolvedOn` and `#reopens` grow with the number of posts seen in a session and are never
       pruned. Two small strings per post, so it is unlikely to matter in a session-length feed,
       but it is unbounded and nothing measures it.
+
+## An image advert that could never hide — 2026-09-26
+
+Third report in a row, third distinct root cause. This one was not a race: the ad was
+unhideable on every scan, unconditionally.
+
+- [x] **`pending` conflated "little text" with "not rendered".** The ad's whole body is one
+      emoji, so `text.length < MIN_READY_CHARS` made it look like an unpopulated lazy-mount
+      slot and the watcher skipped it forever. `pending` now means the row rendered *nothing* —
+      no text, no media, no author, no label.
+- [x] Safe because the router clears text-light posts: two characters cannot reach `MIN_WORDS`,
+      so only a structural advert signal can hide them. A human photo post with a
+      two-character caption is pinned as a control, asserting **not hidden** rather than
+      **not classified**.
+- [x] `/showcase/` was in neither author chain. Advertisers post from showcase pages.
+- [x] The author-name lookup took the first matching element even with no text, so the logo
+      anchor (an `<a>` wrapping only an `<img>`) won and every company/showcase post fell back
+      to the slug — "Aws Developers" for AWS Developers.
+- [x] Added `img[alt="View Sponsored Content"]`, LinkedIn's own accessible name for an ad
+      creative. A second structural signal that does not wait for the label to hydrate.
+- [x] Closed a gap the fix opened: a card routed on empty text now reopens when text appears at
+      all, not only when it grows past the 40-character threshold.
+
+### Found while here
+
+- [x] A pre-existing test named "flags an unfilled lazy-mounted row as pending" did not test
+      that — its fixture had a full actor block and an empty body, which is a rendered card.
+      Corrected, and a genuinely empty slot now has its own test.
+- [ ] **Text-light posts now each cost one inference.** Posts under `MIN_WORDS` route to
+      `ambiguous` by design, and they were previously excluded by the `pending` gate. In an
+      image-heavy feed this is a real increase in model calls for posts with nothing to judge.
+      Triage policy was left alone deliberately — it is calibrated and documented — but a
+      short-circuit for, say, fewer than three words is worth measuring.
+- [ ] `slugToName` silently produces wrong capitalisation for acronym brands. It is a last
+      resort and now reached far less often, but it is still wrong when reached.
