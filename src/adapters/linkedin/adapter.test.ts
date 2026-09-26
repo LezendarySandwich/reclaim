@@ -375,8 +375,8 @@ describe('promoted detection against REAL captured ad markup', () => {
 })
 
 describe('author attribution on a "X commented" card', () => {
-  // Reported from a live feed: the stub named Ivan Slater, who commented, rather than Felipe
-  // Weber, who wrote it. The commenter's profile link comes FIRST in document order, and
+  // Reported from a live feed: the stub named Ivan Slater, who commented, rather than Felix
+  // Werner, who wrote it. The commenter's profile link comes FIRST in document order, and
   // readAuthor took the first match. The leaderboard groups on this value, so the bug credited
   // one person's posting habits to another — the worst class of error in an accusation surface.
   it('attributes the post to the AUTHOR, not the commenter', () => {
