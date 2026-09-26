@@ -112,7 +112,7 @@ behaviour, not a bug.
 
 ## Where the code actually is
 
-**Docs and code across 14 commits. 188 tests passing, typecheck clean, builds for Chrome and Firefox.**
+**16 commits. 209 tests passing, typecheck clean, builds for Chrome and Firefox.**
 
 | Layer | State |
 |---|---|
@@ -121,7 +121,7 @@ behaviour, not a bug.
 | `src/detect/` — triage router | Done. Thresholds deliberately uncalibrated |
 | `src/storage/` — IndexedDB, aggregates, settings | Done |
 | `tests/invariants.test.ts` | Codebase-wide guards for the four non-negotiables |
-| `src/adapters/linkedin/` | **Empty — blocked on S4** |
+| `src/adapters/` — seam, selectors, identity | Foundations done. `adapter.ts` itself **blocked on S4** |
 | `src/engines/` | **Empty — blocked on S2** |
 | Dashboard / popup UI | Placeholders |
 | Consent gate (ADR-020) | Done — gate, manifest, runtime registration. No onboarding UI yet, so nothing can *grant* consent |
@@ -145,9 +145,8 @@ hand-written samples — it pins behaviour we've committed to, not accuracy. Don
 In order:
 
 1. ~~Consent gate~~ — done.
-2. `SiteAdapter` interface and the LinkedIn adapter skeleton, against the candidate selectors the
-   research found (`[data-testid="mainFeed"]`, `componentkey^="expandedFeedType_"`,
-   `[data-testid="expandable-text-box"]`) — structured so your S4 results drop straight in.
+2. ~~`SiteAdapter` seam and LinkedIn foundations~~ — done. Selector profiles for both live
+   feeds, and identity derivation (URN → permalink → composite). `adapter.ts` waits on S4.
 3. `ModelEngine` interface and a Gemini Nano engine, behind the message boundary, so relocating
    the host stays a one-file change if S2 surprises us.
 4. The collapsed stub, in a shadow root, with the infinite-scroll fix prior art says we'll need on
