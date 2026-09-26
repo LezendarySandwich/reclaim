@@ -124,7 +124,7 @@ Reported from a live feed. Measured rather than guessed, and they exposed three 
 ## Job-spam miss — 2026-09-26
 
 Reported from a live feed: an "Apple IS HIRING 🚨" post with `💻 Role:` / `🏢 Company:` /
-`📍 Location:` lines and a `👉 Follow Sahil Hans for more…` closer.
+`📍 Location:` lines and a `👉 Follow Jordan Reyes for more…` closer.
 
 **The router was not at fault** — it already returned `likely_slop` at 0.674, so the post reached
 the model and the model rated it below threshold. But measuring it exposed a separate real bug.

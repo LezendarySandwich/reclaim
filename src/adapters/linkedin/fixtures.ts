@@ -118,8 +118,8 @@ export function realPromotedPostHtml(body: string): string {
 /**
  * A "X commented on this" card: the commenter's profile link appears BEFORE the author's.
  *
- * Reconstructed from a real reported miss where the stub named Igor Šlat, who had commented,
- * instead of Felipe Weber, who wrote the post. The leaderboard aggregates on this value, so the
+ * Reconstructed from a real reported miss where the stub named Ivan Slater, who had commented,
+ * instead of Felix Werner, who wrote the post. The leaderboard aggregates on this value, so the
  * bug credited one person's posting habits to another.
  */
 export function socialContextPostHtml(options: {
@@ -129,10 +129,10 @@ export function socialContextPostHtml(options: {
   authorSlug?: string
   body?: string
 } = {}): string {
-  const commenter = options.commenter ?? 'Igor Šlat'
-  const commenterSlug = options.commenterSlug ?? 'igor-slat'
-  const author = options.author ?? 'Felipe Weber'
-  const authorSlug = options.authorSlug ?? 'felipe-weber'
+  const commenter = options.commenter ?? 'Ivan Slater'
+  const commenterSlug = options.commenterSlug ?? 'ivan-slater'
+  const author = options.author ?? 'Felix Werner'
+  const authorSlug = options.authorSlug ?? 'felix-werner'
   const id = 'socialcontextpostaaaaaaaaaaaaaaaaaaaaaaaaaa'.slice(0, 43)
   const key = `expanded${id}FeedType_MAIN_FEED_RELEVANCE`
   return `<div componentkey="${key}" id="${key}" role="listitem">` +
@@ -146,7 +146,7 @@ export function socialContextPostHtml(options: {
       `<a href="/in/${authorSlug}/" aria-label="View ${author}’s profile">` +
         `<span aria-hidden="true">${author}</span>` +
       `</a>` +
-      `<p><span>Staff Software Engineer at Synthesia</span></p>` +
+      `<p><span>Staff Software Engineer at a video startup</span></p>` +
     `</div>` +
     `<div data-testid="expandable-text-box"><span>${options.body ?? 'Excited to announce a new role.'}</span></div>` +
   `</div>`

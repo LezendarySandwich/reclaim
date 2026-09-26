@@ -115,7 +115,7 @@ function inSocialContext(node: Element, postEl: Element, profile: SelectorProfil
 function readAuthor(postEl: Element, profile: SelectorProfile): { name: string; urn: string } {
   // Take the first candidate that is NOT inside a social-context banner.
   //
-  // On a "Igor Šlat commented on this" card the commenter's profile link comes first in document
+  // On a "Ivan Slater commented on this" card the commenter's profile link comes first in document
   // order, so the previous first-match approach credited the post to them. That value is the
   // leaderboard's grouping key, so the bug did not merely mislabel a stub — it attributed
   // somebody else's posting habits to the wrong person.
@@ -154,7 +154,7 @@ function readAuthor(postEl: Element, profile: SelectorProfile): { name: string; 
     ? href.split('?')[0]!.replace(/\/+$/u, '')
     : ''
 
-  // An aria-label of the form "View Felipe Weber's profile" names the author directly and is
+  // An aria-label of the form "View Felix Werner's profile" names the author directly and is
   // more reliable than the link's own text, which often includes a degree badge or job title.
   const ariaName = link?.getAttribute('aria-label')?.match(/^View\s+(.+?)[’']?s?\s+profile$/iu)?.[1]
 

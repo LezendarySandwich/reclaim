@@ -282,7 +282,7 @@ describe('emoji-prefixed labels (a real missed job-spam post)', () => {
 
 describe('followBait', () => {
   it.each([
-    '👉 Follow Sahil Hans for more job updates, hiring alerts & career opportunities.',
+    '👉 Follow Jordan Reyes for more job updates, hiring alerts & career opportunities.',
     'Follow me for more content like this.',
     'Connect with Jane Doe for daily insights.',
     'Follow us to get weekly updates.',

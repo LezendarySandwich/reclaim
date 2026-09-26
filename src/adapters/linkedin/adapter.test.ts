@@ -375,7 +375,7 @@ describe('promoted detection against REAL captured ad markup', () => {
 })
 
 describe('author attribution on a "X commented" card', () => {
-  // Reported from a live feed: the stub named Igor Šlat, who commented, rather than Felipe
+  // Reported from a live feed: the stub named Ivan Slater, who commented, rather than Felipe
   // Weber, who wrote it. The commenter's profile link comes FIRST in document order, and
   // readAuthor took the first match. The leaderboard groups on this value, so the bug credited
   // one person's posting habits to another — the worst class of error in an accusation surface.
@@ -384,15 +384,15 @@ describe('author attribution on a "X commented" card', () => {
     adapter.detectProfile(document)
     const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
     const post = adapter.extract(el)!.post
-    expect(post.authorName).toBe('Felipe Weber')
-    expect(post.authorUrn).toBe('/in/felipe-weber')
+    expect(post.authorName).toBe('Felix Werner')
+    expect(post.authorUrn).toBe('/in/felix-werner')
   })
 
   it('does not leak the commenter into the author URN', () => {
-    renderModernFeed([socialContextPostHtml({ commenterSlug: 'igor-slat' })])
+    renderModernFeed([socialContextPostHtml({ commenterSlug: 'ivan-slater' })])
     adapter.detectProfile(document)
     const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
-    expect(adapter.extract(el)!.post.authorUrn).not.toContain('igor')
+    expect(adapter.extract(el)!.post.authorUrn).not.toContain('ivan')
   })
 
   it('reads the name out of the "View X’s profile" label', () => {

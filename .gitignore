@@ -49,3 +49,10 @@ Thumbs.db
 npm-debug.log*
 pnpm-debug.log*
 yarn-error.log*
+
+# Throwaway Chrome profile created by the S2 spike harness. 8MB of caches, metrics and
+# machine-identifying state that a broad `git add` will otherwise sweep in.
+scripts/spikes/*/profile/
+scripts/spikes/*/results.jsonl
+scripts/spikes/*/chrome.log
+scripts/spikes/*/srv.log

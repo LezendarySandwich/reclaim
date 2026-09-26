@@ -74,7 +74,7 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
         '[componentkey="social-actions-key"]',
         '[data-testid="comments-container"]',
       ],
-      // The "Igor Šlat commented on this" banner above a post. Excluded from author extraction
+      // The "Ivan Slater commented on this" banner above a post. Excluded from author extraction
       // because the person named there is NOT the author, and from body text for the same
       // reason it pollutes the model input.
       socialContext: [

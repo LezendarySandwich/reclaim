@@ -208,8 +208,8 @@ three prefixes and across three separately captured posts.
 
 ## Author misattribution on social-context cards — 2026-09-26
 
-Reported from a live feed: a post by Felipe Weber, surfaced because Igor Šlat had commented on
-it, was attributed to **Igor**.
+Reported from a live feed: a post by Felix Werner, surfaced because Ivan Slater had commented on
+it, was attributed to **Ivan**.
 
 **This is the worst class of bug in this product.** `authorUrn` is the leaderboard's grouping
 key, so it did not merely mislabel a stub — it credited one person's posting habits to another,
