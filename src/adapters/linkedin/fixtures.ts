@@ -133,7 +133,7 @@ export function realPromotedPostHtml(body: string): string {
  *
  * Two things make it distinct from `REAL_PROMOTED_ACTOR_BLOCK`, and both were reported misses:
  *
- *  1. A *person's* follow banner ("Harsh Vardhan follows this page") sits above a *company's*
+ *  1. A *person's* follow banner ("Nadia Brennan follows this page") sits above a *company's*
  *     promoted post, so the first `/in/` link in document order belongs to someone who is not the
  *     author. Author attribution must resolve to the company.
  *  2. The root componentkey carries `FeedType_MAIN_FEED_RELEVANCE` — the SAME FeedType as an
@@ -146,9 +146,9 @@ export function realPromotedPostHtml(body: string): string {
 export const REAL_FOLLOW_BANNER =
   '<h2><span>Feed post</span><span aria-hidden="true"></span></h2>' +
   // The follow banner. Its /in/ link precedes the actor block.
-  '<div><a href="https://www.linkedin.com/in/harshv07/"><figure aria-hidden="true"></figure></a>' +
-  '<div><p><span><a aria-label="View Harsh Vardhan’s profile" href="https://www.linkedin.com/in/harshv07/">' +
-  '<strong>Harsh Vardhan</strong></a><span> </span>follows this page</span></p></div>' +
+  '<div><a href="https://www.linkedin.com/in/nadia-brennan/"><figure aria-hidden="true"></figure></a>' +
+  '<div><p><span><a aria-label="View Nadia Brennan’s profile" href="https://www.linkedin.com/in/nadia-brennan/">' +
+  '<strong>Nadia Brennan</strong></a><span> </span>follows this page</span></p></div>' +
   '<button type="button" aria-label="Open control menu for post by Redpanda Data"><span></span></button></div>'
 
 /** The company actor block. In the reported miss this painted *after* the body text. */
