@@ -301,7 +301,22 @@ See `AGENTS.md` for the binding version.
 ---
 
 ## ADR-018 — The Prompt API engine lives in the service worker, not the offscreen document
-**2026-09-26 · Accepted · supersedes ADR-009 for the Gemini Nano path**
+**2026-09-26 · Accepted · VERIFIED IN A REAL SERVICE WORKER · supersedes ADR-009 for the Gemini Nano path**
+
+> **Confirmed empirically 2026-09-26.** Run from the extension's own service-worker console on
+> Chrome 153:
+> ```
+> context                   ServiceWorkerGlobalScope
+> LanguageModel present     YES
+> availability()            downloadable
+> ```
+> The Chromium source reading below was correct. This was the single largest unverified assumption
+> in the build, and the model layer is in the right place.
+>
+> One surprise: `LanguageModel.params()` returned **undefined** in that same context. Either
+> params are unknowable before the model is downloaded, or this build has legacy sampling params
+> off — indistinguishable from outside. The engine now tries `temperature: 0, topK: 1` and falls
+> back to default sampling if `create()` rejects them, rather than dying. See ADR-024.
 
 ADR-009 was backwards. It rested on "the Prompt API is unavailable in MV3 service workers", which
 is wrong for extensions, and the correction inverts which context is privileged.
@@ -475,3 +490,33 @@ parameter, an install ID, anything — it needs a new ADR.
 **Consequence:** because the extension hides nothing without a model, a broken selector and a
 missing model look identical to the user. Instrument the difference: ship a stale-selector sentinel
 that detects "feed root found, zero posts matched" and surfaces it distinctly.
+
+
+---
+
+## ADR-024 — Greedy decoding is best-effort, and its absence is surfaced
+**2026-09-26 · Accepted**
+
+The engine asks for `temperature: 0, topK: 1`. If `create()` rejects those options it retries
+without them rather than failing, and exposes `isDeterministic === false`.
+
+**Why this is not just defensive coding.** Greedy decoding is what makes a post's verdict
+reproducible. Without it:
+
+- the verdict cache becomes misleading — the same post genuinely could have scored differently,
+  so a cached verdict is not "the answer" but "an answer";
+- threshold calibration from shadow data measures sampling noise as well as signal;
+- a user who expands a post and sees it re-collapse differently has no explanation.
+
+So this is not a silent degradation. The dashboard must say that scores are unstable on this
+device, and calibration must not treat such data as clean.
+
+**Why the retry is narrow.** `isLikelySamplingRejection` only matches `NotSupportedError`,
+`TypeError`, or a message naming the sampling options. A blanket retry-on-any-error would mask a
+model that genuinely cannot load, which should surface as `degraded` rather than quietly failing
+twice.
+
+**Prompted by observation, not theory:** `LanguageModel.params()` returned `undefined` in a real
+extension service worker on Chrome 153 while availability was `"downloadable"`. The research said
+extensions retain legacy sampling params; that may still be true and params may simply be
+unknowable before download. Rather than resolve it from outside, the code is correct either way.

@@ -249,3 +249,74 @@ describe('unload', () => {
     await expect(new GeminiNanoEngine().unload()).resolves.toBeUndefined()
   })
 })
+
+describe('sampling-parameter fallback', () => {
+  /** A LanguageModel whose create() rejects the sampling options, as some builds may. */
+  function installParamRejectingModel() {
+    const state = { attempts: [] as Array<Record<string, unknown>> }
+    const session = () => ({
+      prompt: async () => '{"bait":"none","ai":"none","reason":"x"}',
+      clone: async () => session(),
+      destroy: () => {},
+    })
+    ;(globalThis as Record<string, unknown>).LanguageModel = {
+      availability: async () => 'available',
+      create: async (opts?: Record<string, unknown>) => {
+        state.attempts.push(opts ?? {})
+        if ('temperature' in (opts ?? {})) {
+          throw new DOMException('temperature is not supported', 'NotSupportedError')
+        }
+        return session()
+      },
+    }
+    return state
+  }
+
+  it('retries without sampling options when create() rejects them', async () => {
+    // Observed on Chrome 153: params() returned undefined in a service worker. Hard-passing
+    // temperature/topK would kill the engine permanently rather than degrading.
+    const state = installParamRejectingModel()
+    const engine = new GeminiNanoEngine()
+    await engine.load()
+    expect(engine.isLoaded).toBe(true)
+    expect(state.attempts).toHaveLength(2)
+    expect(state.attempts[0]).toHaveProperty('temperature')
+    expect(state.attempts[1]).not.toHaveProperty('temperature')
+  })
+
+  it('reports that verdicts are no longer reproducible', async () => {
+    installParamRejectingModel()
+    const engine = new GeminiNanoEngine()
+    await engine.load()
+    expect(engine.isDeterministic).toBe(false)
+  })
+
+  it('reports deterministic when greedy decoding was accepted', async () => {
+    installFakeLanguageModel()
+    const engine = new GeminiNanoEngine()
+    await engine.load()
+    expect(engine.isDeterministic).toBe(true)
+  })
+
+  it('does NOT retry on an unrelated failure', async () => {
+    // A model that genuinely cannot load must surface as degraded, not retry and fail twice.
+    let calls = 0
+    ;(globalThis as Record<string, unknown>).LanguageModel = {
+      availability: async () => 'available',
+      create: async () => {
+        calls++
+        throw new DOMException('device out of memory', 'QuotaExceededError')
+      },
+    }
+    await expect(new GeminiNanoEngine().load()).rejects.toThrow(/out of memory/)
+    expect(calls).toBe(1)
+  })
+
+  it('resets determinism on unload', async () => {
+    installFakeLanguageModel()
+    const engine = new GeminiNanoEngine()
+    await engine.load()
+    await engine.unload()
+    expect(engine.isDeterministic).toBe(false)
+  })
+})

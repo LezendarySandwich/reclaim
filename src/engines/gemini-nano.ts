@@ -53,6 +53,18 @@ interface LanguageModelStatic {
   params?(): Promise<{ defaultTopK: number; maxTopK: number; defaultTemperature: number } | null>
 }
 
+/**
+ * Does this rejection look like `create()` objecting to the sampling options?
+ *
+ * Deliberately narrow. A blanket retry-on-any-error would mask genuine failures — a model that
+ * cannot load should surface as `degraded`, not silently retry and fail twice.
+ */
+function isLikelySamplingRejection(e: unknown): boolean {
+  if (!(e instanceof Error)) return false
+  if (e.name === 'NotSupportedError' || e.name === 'TypeError') return true
+  return /temperature|topk|sampling|unsupported option|unknown option/i.test(e.message)
+}
+
 function getLanguageModel(): LanguageModelStatic | null {
   const g = globalThis as unknown as { LanguageModel?: LanguageModelStatic }
   return typeof g.LanguageModel === 'object' || typeof g.LanguageModel === 'function'
@@ -69,6 +81,14 @@ export class GeminiNanoEngine implements ModelEngine {
    */
   #base: LanguageModelSession | null = null
   #loading: Promise<void> | null = null
+  /**
+   * Whether greedy decoding was actually accepted.
+   *
+   * Matters beyond curiosity: without it the same post can get different verdicts on different
+   * runs, which makes the verdict cache misleading and any threshold calibration noisy. The
+   * dashboard should say so rather than quietly presenting unstable scores as measurements.
+   */
+  #greedy = false
 
   async availability(): Promise<Availability> {
     const lm = getLanguageModel()
@@ -96,28 +116,43 @@ export class GeminiNanoEngine implements ModelEngine {
         throw new Error('Gemini Nano is unavailable on this device')
       }
 
-      this.#base = await lm.create({
-        initialPrompts: buildInitialPrompts(),
-        // Greedy decoding. We want the same post to get the same verdict every time — otherwise
-        // the verdict cache is lying and threshold calibration is measuring noise. Only
-        // extensions still get these knobs.
-        temperature: 0,
-        topK: 1,
-        monitor: (m) => {
-          if (!onProgress) return
-          m.addEventListener('downloadprogress', (event) => {
-            const e = event as Event & { loaded?: number; total?: number }
-            const loaded = e.loaded ?? 0
-            const total = e.total ?? 0
-            onProgress({
-              // Chrome has reported `loaded` as both a 0-1 fraction and a byte count across
-              // versions, so normalise defensively rather than trusting either.
-              fraction: total > 0 ? loaded / total : Math.min(1, loaded),
-              ...(total > 0 ? { loadedBytes: loaded, totalBytes: total } : {}),
-            })
+      const monitor = (m: EventTarget): void => {
+        if (!onProgress) return
+        m.addEventListener('downloadprogress', (event) => {
+          const e = event as Event & { loaded?: number; total?: number }
+          const loaded = e.loaded ?? 0
+          const total = e.total ?? 0
+          onProgress({
+            // Chrome has reported `loaded` as both a 0-1 fraction and a byte count across
+            // versions, so normalise defensively rather than trusting either.
+            fraction: total > 0 ? loaded / total : Math.min(1, loaded),
+            ...(total > 0 ? { loadedBytes: loaded, totalBytes: total } : {}),
           })
-        },
-      })
+        })
+      }
+
+      // Greedy decoding, so the same post always gets the same verdict — otherwise the verdict
+      // cache is lying and threshold calibration is measuring sampling noise.
+      //
+      // These are an extensions-only privilege and NOT guaranteed present. Observed on
+      // Chrome 153: `LanguageModel.params()` returned undefined in a service worker while
+      // availability was "downloadable". That may just mean params are unknowable before the
+      // model exists, or it may mean this build has legacy sampling params off — the two are
+      // indistinguishable from here. Either way, hard-passing them would make `create()` reject
+      // and kill the engine permanently, so fall back to default sampling instead of failing.
+      try {
+        this.#base = await lm.create({
+          initialPrompts: buildInitialPrompts(),
+          temperature: 0,
+          topK: 1,
+          monitor,
+        })
+        this.#greedy = true
+      } catch (e) {
+        if (!isLikelySamplingRejection(e)) throw e
+        this.#base = await lm.create({ initialPrompts: buildInitialPrompts(), monitor })
+        this.#greedy = false
+      }
     })().finally(() => {
       this.#loading = null
     })
@@ -174,10 +209,16 @@ export class GeminiNanoEngine implements ModelEngine {
       // Ignore — we are discarding it regardless.
     }
     this.#base = null
+    this.#greedy = false
   }
 
   /** Test seam. Lets the suite assert lifecycle behaviour without a real model. */
   get isLoaded(): boolean {
     return this.#base !== null
+  }
+
+  /** False when this build refused the sampling options and verdicts are therefore not reproducible. */
+  get isDeterministic(): boolean {
+    return this.#greedy
   }
 }
