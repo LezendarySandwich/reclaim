@@ -2,7 +2,12 @@ import { browser } from 'wxt/browser'
 import { errorResponse, isRequestFor } from '../core/messages'
 import type { Response } from '../core/messages'
 import { gateState, mayReadPosts } from '../core/consent'
-import { hasConsent } from '../storage/settings'
+import { hasConsent, loadSettings } from '../storage/settings'
+import { InferenceScheduler, classifyBatch } from '../core/pipeline'
+import { GeminiNanoEngine } from '../engines/gemini-nano'
+import { PROMPT_VERSION } from '../engines/prompt'
+import { RULES_VERSION } from '../detect/triage'
+import type { Axis, EngineState } from '../core/types'
 
 /**
  * Service worker — router, consent gate, and (later) the Prompt API host.
@@ -13,39 +18,70 @@ import { hasConsent } from '../storage/settings'
  * context for the Prompt API, and an offscreen document (a Window that can never obtain user
  * activation) is the handicapped one. The offscreen document is kept for WebLLM only.
  *
- * Still no IndexedDB here: the offscreen document outlives this worker, so it owns writes.
+ * No offscreen document is created yet. ADR-018 retains one for the WebLLM tier, which genuinely
+ * needs it (service workers lack WASM/Workers/Atomics) — but WebLLM is deferred (ADR-022), so
+ * shipping the permission and the document now would mean an unjustified install warning and a
+ * Chrome Web Store reviewer asking a question we have no good answer to. Both come back with the
+ * engine that needs them.
+ *
+ * IndexedDB writes will move to that offscreen document when it returns, because it outlives this
+ * worker. Until then the dashboard owns them.
  */
 
 const CONTENT_SCRIPT_ID = 'linkedin-feed'
 const LINKEDIN_ORIGIN = 'https://www.linkedin.com/*'
 const LINKEDIN_FEED_MATCH = 'https://www.linkedin.com/feed/*'
 
-const OFFSCREEN_PATH = '/offscreen.html'
+/**
+ * One engine and one scheduler for the whole worker.
+ *
+ * Module scope, not per-message: backpressure is only meaningful if it spans every tab and every
+ * batch, and the engine's base session — the system prompt plus few-shot anchors — is expensive
+ * to build.
+ *
+ * Caveat worth remembering: the service worker is evicted after ~30s idle, so both of these die
+ * with it and the next classify pays `create()` again. That cost is unmeasured, and it is the one
+ * remaining argument for hosting the model in an offscreen document after all (brief risk A2).
+ */
+const engine = new GeminiNanoEngine()
+const scheduler = new InferenceScheduler<Partial<Record<Axis, number>>>()
 
-let creating: Promise<void> | null = null
+let engineState: EngineState = { status: 'uninitialized' }
 
-/** Race-free. Only one offscreen document may exist, and concurrent callers will both try. */
-async function ensureOffscreen(): Promise<void> {
-  const existing = await browser.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [browser.runtime.getURL(OFFSCREEN_PATH)],
-  })
-  if (existing.length > 0) return
-  if (creating) return creating
+/** Bring the engine up, mapping every failure onto the fail-open state machine (ADR-005). */
+async function loadEngine(): Promise<void> {
+  if (engineState.status === 'ready' || engineState.status === 'downloading') return
 
-  const pending = browser.offscreen
-    .createDocument({
-      url: OFFSCREEN_PATH,
-      reasons: ['WORKERS'],
-      justification:
-        'Hosts the on-device language model session used to classify feed posts locally.',
+  engineState = { status: 'checking' }
+  try {
+    const availability = await engine.availability()
+
+    if (availability === 'unavailable') {
+      // Enterprise policy (`GenAILocalFoundationalModelSettings`) and unsupported hardware are
+      // indistinguishable from here — both surface as a permanent 'unavailable' — so the reason
+      // has to cover both, and the UI copy has to name both.
+      engineState = { status: 'degraded', reason: 'unsupported_hardware_or_policy' }
+      return
+    }
+    if (availability === 'downloadable') {
+      // Stop here deliberately. The worker could start a multi-gigabyte download with no user
+      // gesture, and that is exactly why it must not — see ADR-018.
+      engineState = { status: 'needs_setup' }
+      return
+    }
+
+    engineState = { status: 'downloading', fraction: 0 }
+    await engine.load((p) => {
+      engineState = { status: 'downloading', fraction: p.fraction }
     })
-    .finally(() => {
-      creating = null
-    })
-
-  creating = pending
-  return pending
+    engineState = { status: 'ready', engineId: engine.id }
+  } catch (e) {
+    engineState = {
+      status: 'degraded',
+      reason: 'engine_error',
+      detail: e instanceof Error ? e.message : String(e),
+    }
+  }
 }
 
 async function hasHostPermission(): Promise<boolean> {
@@ -98,6 +134,11 @@ export default defineBackground(() => {
   browser.permissions.onRemoved.addListener(() => void reconcileContentScript())
   void reconcileContentScript()
 
+  // Probe the engine on wake. Never starts a download on its own — `loadEngine` stops at
+  // `needs_setup` when the model is merely downloadable, so the multi-gigabyte fetch stays
+  // behind an explicit click on an extension page.
+  void loadEngine()
+
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!isRequestFor(msg, 'background')) return false
 
@@ -108,35 +149,51 @@ export default defineBackground(() => {
           case 'CLASSIFY_BATCH': {
             // Defence in depth. The content script should not be running at all without consent,
             // but a stale registration or a racing revoke must not result in a classification.
-            const state = gateState({
+            const gate = gateState({
               hasConsent: await hasConsent(),
               hasHostPermission: await hasHostPermission(),
             })
-            if (!mayReadPosts(state)) {
-              response = errorResponse(new Error(`Consent gate is ${state.status}`))
+            if (!mayReadPosts(gate)) {
+              response = errorResponse(new Error(`Consent gate is ${gate.status}`))
               break
             }
-            await ensureOffscreen()
-            // TODO(007): run the engine. Until it exists we fail open — an empty verdict list
-            // hides nothing.
-            response = { ok: true, type: 'CLASSIFY_BATCH', verdicts: [] }
+
+            const classified = await classifyBatch(msg.posts, {
+              engine,
+              settings: await loadSettings(),
+              engineState,
+              rulesVersion: `${RULES_VERSION}+${PROMPT_VERSION}`,
+              // One scheduler for the whole worker, not one per batch: backpressure is only
+              // meaningful if it spans every tab and every message.
+              scheduler,
+            })
+
+            response = { ok: true, type: 'CLASSIFY_BATCH', verdicts: classified.map((c) => c.verdict) }
             break
           }
           case 'GET_ENGINE_STATE': {
-            const state = gateState({
+            const gate = gateState({
               hasConsent: await hasConsent(),
               hasHostPermission: await hasHostPermission(),
             })
             response = {
               ok: true,
               type: 'GET_ENGINE_STATE',
-              state: mayReadPosts(state) ? { status: 'needs_setup' } : { status: 'uninitialized' },
+              state: mayReadPosts(gate) ? engineState : { status: 'uninitialized' },
             }
             break
           }
-          case 'INSTALL_MODEL':
-            response = errorResponse(new Error('Model layer not implemented'))
+          case 'INSTALL_MODEL': {
+            // Reachable only from an extension page, because `create()` needs a transient user
+            // gesture when the model is not yet present. The service worker is technically
+            // exempt (no Window), but a multi-gigabyte download deserves an explicit click —
+            // see ADR-018.
+            await loadEngine()
+            response = engineState.status === 'ready'
+              ? { ok: true, type: 'INSTALL_MODEL' }
+              : errorResponse(new Error(`Engine is ${engineState.status}`))
             break
+          }
         }
       } catch (e) {
         response = errorResponse(e)

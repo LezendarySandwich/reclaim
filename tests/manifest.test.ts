@@ -29,14 +29,10 @@ describe.runIf(chrome)('chrome manifest', () => {
     expect(chrome!.manifest_version).toBe(3)
   })
 
-  it('requests exactly the five justified permissions', () => {
-    expect(chrome!.permissions).toEqual([
-      'offscreen',
-      'storage',
-      'alarms',
-      'webNavigation',
-      'scripting',
-    ])
+  it('requests exactly the four justified permissions', () => {
+    // 'offscreen' is deliberately absent: the Prompt API runs in the service worker (ADR-018),
+    // and the offscreen document is only needed by the deferred WebLLM tier (ADR-022).
+    expect(chrome!.permissions).toEqual(['storage', 'alarms', 'webNavigation', 'scripting'])
   })
 
   // ADR-020: access is requested during onboarding from a real user gesture, not granted at
@@ -59,7 +55,15 @@ describe.runIf(chrome)('chrome manifest', () => {
     expect(chrome!.permissions).toContain('scripting')
   })
 
-  it.each(['tabs', 'activeTab', 'cookies', 'downloads', 'unlimitedStorage', '<all_urls>'])(
+  it.each([
+    'tabs',
+    'activeTab',
+    'cookies',
+    'downloads',
+    'unlimitedStorage',
+    'offscreen',
+    '<all_urls>',
+  ])(
     'does not request %s',
     (perm) => {
       const all = [

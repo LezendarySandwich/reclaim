@@ -16,7 +16,6 @@ export default defineConfig({
     minimum_chrome_version: '138',
 
     permissions: [
-      'offscreen', // hosts the WebLLM engine; the Prompt API runs in the SW (ADR-018)
       'storage', // settings and consent only; post history lives in IndexedDB
       'alarms', // retention purge and the model-drift canary
       'webNavigation', // LinkedIn is an SPA; content scripts need re-attach on route change
@@ -59,3 +58,6 @@ export default defineConfig({
 //   downloads         — JSONL export uses a blob anchor from the dashboard page
 //   unlimitedStorage  — widens the install warning. Try navigator.storage.persist() first and
 //                       add this only if measurement shows eviction.
+//   offscreen         — the Prompt API runs in the service worker (ADR-018). An offscreen
+//                       document is only needed for the deferred WebLLM tier (ADR-022), so the
+//                       permission returns with the engine that justifies it.

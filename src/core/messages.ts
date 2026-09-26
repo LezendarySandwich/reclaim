@@ -6,16 +6,29 @@
  * side panel, only the router changes — see technical-brief.md §2.3.
  */
 
-import type { EngineState, Post, Verdict } from './types'
+import type { Axis, EngineState, Post, Verdict } from './types'
+
+/**
+ * A post plus what the in-tab triage router already worked out about it.
+ *
+ * The heuristic scores travel with the post so they can be RECORDED alongside the model's
+ * verdict — the dashboard shows both, and comparing them over time is how the router eventually
+ * gets calibrated. They are recorded, never acted on: heuristics route, they do not judge
+ * (ADR-004), and `mergeVerdict` enforces that independently.
+ */
+export interface TriagedPost {
+  post: Post
+  heuristics: Partial<Record<Axis, number>>
+}
 
 /** Discriminator for broadcast messages, so contexts ignore traffic meant for others. */
 export type MessageTarget = 'background' | 'offscreen'
 
 export type Request =
   /** content script → background → offscreen */
-  | { type: 'CLASSIFY_BATCH'; target: 'background'; posts: Post[] }
+  | { type: 'CLASSIFY_BATCH'; target: 'background'; posts: TriagedPost[] }
   /** background → offscreen. Same payload, different hop. */
-  | { type: 'OFFSCREEN_CLASSIFY'; target: 'offscreen'; posts: Post[] }
+  | { type: 'OFFSCREEN_CLASSIFY'; target: 'offscreen'; posts: TriagedPost[] }
   /** any context → background */
   | { type: 'GET_ENGINE_STATE'; target: 'background' }
   /** dashboard → background. Must originate from a user gesture on an extension page: the Prompt
