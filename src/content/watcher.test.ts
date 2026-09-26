@@ -37,8 +37,20 @@ beforeEach(() => {
   clearFeed()
 })
 
+/**
+ * Audit sampling is OFF unless a test asks for it.
+ *
+ * It defaults to 5% against real `Math.random()`, which made every "a clean post is not sent to
+ * the model" assertion in this file fail one run in twenty — independently, so the suite as a
+ * whole was failing spuriously often enough to be mistaken for a real regression. Sampling
+ * behaviour has its own tests that set the rate explicitly.
+ */
 function makeWatcher(classify: (p: never[]) => Promise<Verdict[]>) {
-  return new FeedWatcher({ adapter: new LinkedInAdapter(), classify: classify as never })
+  return new FeedWatcher({
+    adapter: new LinkedInAdapter(),
+    classify: classify as never,
+    auditRate: 0,
+  })
 }
 
 describe('start', () => {
@@ -57,7 +69,7 @@ describe('start', () => {
   it('reports adapter health', () => {
     feed()
     const onHealth = vi.fn()
-    new FeedWatcher({ adapter: new LinkedInAdapter(), classify: async () => [], onHealth }).start()
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify: async () => [], onHealth, auditRate: 0 }).start()
     // Feed root present, zero posts — the case that must be distinguishable from "no model".
     expect(onHealth).toHaveBeenCalledWith({ status: 'stale_selectors', profile: 'modern' })
   })
@@ -78,7 +90,7 @@ describe('triage gating', () => {
   it('sends baity posts, with the heuristic scores attached', async () => {
     feed(post('bbbbbbbbbbbbbbbbbb', BAIT))
     const classify = vi.fn(async (_posts: TriagedPost[]): Promise<Verdict[]> => [])
-    new FeedWatcher({ adapter: new LinkedInAdapter(), classify }).start()
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
     FakeIO.instances[0]!.fireAll()
     await new Promise((r) => setTimeout(r, 10))
     expect(classify).toHaveBeenCalledOnce()
@@ -94,6 +106,7 @@ describe('applying verdicts', () => {
     feed(post('cccccccccccccccccc', BAIT))
     const w = new FeedWatcher({
       adapter: new LinkedInAdapter(),
+      auditRate: 0,
       classify: async (posts) => [
         {
           postId: posts[0]!.post.id,
@@ -115,6 +128,7 @@ describe('applying verdicts', () => {
     feed(post('dddddddddddddddddd', BAIT))
     const w = new FeedWatcher({
       adapter: new LinkedInAdapter(),
+      auditRate: 0,
       classify: async (posts) => [
         {
           postId: posts[0]!.post.id,
@@ -224,7 +238,7 @@ describe('queue ordering favours what is arriving', () => {
       seen.push(posts.map((p) => p.post.authorName))
       return [] as Verdict[]
     })
-    new FeedWatcher({ adapter: new LinkedInAdapter(), classify }).start()
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
     FakeIO.instances[0]!.fireAll()
     await new Promise((r) => setTimeout(r, 20))
     // Both land in one batch; the newest-queued is at the front of it.
