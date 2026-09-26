@@ -77,8 +77,14 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
       // as a "has media" signal. Scoped to the CDN path instead — UNVERIFIED, because no post in
       // the sample had an attached image.
       media: ['img[src*="media.licdn.com"]', 'video'],
-      // S4: every sponsored candidate scored 0/8, and `promotedByText` was also 0 — there were
-      // simply no promoted posts in the sample. UNTESTED, not disproven. Do not delete.
+      // DISPROVEN, not merely untested. Captured markup from a live Datadog ad (2026-09-26)
+      // contains NONE of these: its componentkeys are opaque UUIDs
+      // (`4f2424c1-c53e-4c8f-9c63-172e339627d9`), and there is no data-sponsored-tracking-url,
+      // no data-view-tracking-scope and no data-is-sponsored anywhere in the subtree.
+      //
+      // On this build the standalone "Promoted" text label is the ONLY signal. These are kept
+      // because LinkedIn ships two feeds and filter-list maintainers still carry rules for them,
+      // so they may match elsewhere — but nothing here should be relied on.
       sponsored: [
         '[componentkey="sponsored-indicator-key"]',
         '[data-sponsored-tracking-url]',

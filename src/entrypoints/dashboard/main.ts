@@ -11,6 +11,8 @@ import {
   loadPanelData,
   overviewPanel,
   routerPanel,
+  thresholdPanel,
+  trendPanel,
 } from './panels'
 import type { MachineSpecs } from '../../engines/types'
 import type { Request, Response } from '../../core/messages'
@@ -361,7 +363,9 @@ async function render(): Promise<void> {
     const [panelData, settings] = await Promise.all([loadPanelData(Date.now()), loadSettings()])
     root.append(
       overviewPanel(panelData),
+      trendPanel(panelData),
       axisPanel(panelData, settings),
+      thresholdPanel(panelData, settings),
       routerPanel(panelData, settings),
       historyPanel(panelData, (row) => {
         // Disagreement is recorded per axis. For ai_written this is an "annoyance" label and

@@ -120,34 +120,40 @@ function readMedia(postEl: Element, profile: SelectorProfile): MediaRef[] {
   }))
 }
 
-/** How many lines from the top of a post the "Promoted" label can appear on. */
-const PROMOTED_LABEL_SCAN_LINES = 8
+/**
+ * Elements scanned for a standalone "Promoted" label. Bounded so a large post subtree cannot
+ * turn this into a hot-path cost.
+ */
+const PROMOTED_SCAN_LIMIT = 60
 
 function isPromoted(postEl: Element, profile: SelectorProfile): boolean {
   if (queryFirst(postEl, profile.sponsored)) return true
 
-  // The label must be a line OF ITS OWN near the top, not a substring anywhere.
+  // Scan ELEMENTS, not lines of text.
   //
-  // A substring check would fire on "I was promoted to Senior Engineer" — among the most common
-  // posts on LinkedIn — and hiding somebody's promotion announcement as an advert is about the
-  // worst false positive this extension could produce. Real ads render the label standalone in
-  // the actor block:
+  // Two wrong approaches preceded this, and captured markup from a live Datadog ad disproved
+  // both. A substring check on textContent would fire on "I was promoted to Senior Engineer" —
+  // among the commonest posts on LinkedIn, and hiding somebody's promotion as an advert is the
+  // worst false positive this extension could produce. Splitting textContent on newlines was no
+  // better: textContent concatenates text nodes with NO separators, so that same ad reads
   //
-  //     PagerDuty
-  //     72,083 followers
-  //     Promoted
+  //     "Datadog 587,644 followersPromoted"
   //
-  // Structural markers alone are not enough either: every sponsored selector scored 0/8 in S4
-  // because the sample contained no ads, so both halves are load-bearing.
-  const lines = (postEl.textContent ?? '')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .slice(0, PROMOTED_LABEL_SCAN_LINES)
-
-  return lines.some((line) =>
-    PROMOTED_LABELS.some((label) => line.toLowerCase() === label.toLowerCase()),
-  )
+  // as a single line and matches nothing.
+  //
+  // What the ad actually contains is <p><span>Promoted</span></p> — an element whose entire text
+  // is the label. That is both reliable and inherently safe against the promotion-announcement
+  // case, because "I was promoted to Senior Engineer" is never an element's whole content.
+  const candidates = postEl.querySelectorAll('span, p, li, h3, h4')
+  const limit = Math.min(candidates.length, PROMOTED_SCAN_LIMIT)
+  for (let i = 0; i < limit; i++) {
+    const text = (candidates[i]?.textContent ?? '').trim()
+    // Cheap length gate before the case-folding comparison — most elements are long prose.
+    if (text.length === 0 || text.length > 24) continue
+    const lower = text.toLowerCase()
+    if (PROMOTED_LABELS.some((label) => lower === label.toLowerCase())) return true
+  }
+  return false
 }
 
 export class LinkedInAdapter implements SiteAdapter {

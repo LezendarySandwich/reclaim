@@ -164,3 +164,24 @@ a { color: LinkText; }
   font-size: 0.9375rem;
   white-space: pre-wrap;
 }
+
+/* Trend + histogram ------------------------------------------------------------------------ */
+.spark { color: AccentColor; margin: 0.5rem 0 0.75rem; }
+.spark svg { display: block; }
+
+h3 { font-size: 0.9375rem; margin: 1rem 0 0.4rem; }
+.hist {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 4rem;
+  padding: 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+.hist-col { flex: 1 1 0; height: 100%; display: flex; align-items: flex-end; }
+.hist-col > i { display: block; width: 100%; background: var(--line); border-radius: 2px 2px 0 0; min-height: 1px; }
+.hist-col.above > i { background: AccentColor; }
+@media (forced-colors: active) {
+  .hist-col > i { background: ButtonBorder; }
+  .hist-col.above > i { background: Highlight; }
+}

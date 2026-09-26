@@ -201,3 +201,170 @@ export function feedbackByAxis(labels: readonly StoredLabel[], minSample = 10): 
     usableForTuning: TUNABLE.has(axis),
   }))
 }
+
+// ── Time series ─────────────────────────────────────────────────────────────────────────────
+
+export interface DayBucket {
+  /** Local-time day key, YYYY-MM-DD. */
+  day: string
+  /** Midnight local time for that day, epoch ms. */
+  at: number
+  seen: number
+  hidden: number
+  /**
+   * hidden / seen, or null when too few posts that day to mean anything.
+   *
+   * The rate is the honest series and the count is the misleading one: hiding 20 posts today and
+   * 5 yesterday may only mean you scrolled four times as far. Anything plotting counts over time
+   * is really plotting how much the user scrolled.
+   */
+  rate: number | null
+}
+
+const MIN_PER_DAY_FOR_RATE = 5
+
+function dayKey(at: number): string {
+  const d = new Date(at)
+  // Local time, not UTC: a user's sense of "yesterday" is their own midnight.
+  const m = `${d.getMonth() + 1}`.padStart(2, '0')
+  const day = `${d.getDate()}`.padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+function startOfDay(at: number): number {
+  const d = new Date(at)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+/**
+ * Daily buckets, including days with no activity.
+ *
+ * Gaps matter: a sparkline that silently omits empty days compresses time and implies continuous
+ * use that did not happen.
+ */
+export function dailySeries(
+  rows: readonly StoredVerdict[],
+  now: number,
+  days: number,
+): DayBucket[] {
+  const buckets = new Map<string, { seen: number; hidden: number; at: number }>()
+
+  const todayStart = startOfDay(now)
+  for (let i = days - 1; i >= 0; i--) {
+    const at = todayStart - i * 24 * 60 * 60 * 1000
+    buckets.set(dayKey(at), { seen: 0, hidden: 0, at })
+  }
+
+  for (const row of rows) {
+    const key = dayKey(row.at)
+    const bucket = buckets.get(key)
+    if (!bucket) continue // outside the window
+    bucket.seen++
+    if (row.action === 'collapse') bucket.hidden++
+  }
+
+  return [...buckets.entries()].map(([day, b]) => ({
+    day,
+    at: b.at,
+    seen: b.seen,
+    hidden: b.hidden,
+    rate: b.seen >= MIN_PER_DAY_FOR_RATE ? b.hidden / b.seen : null,
+  }))
+}
+
+/** Days with enough activity to plot. Fewer than three and a trend line is decoration. */
+export function hasPlottableTrend(series: readonly DayBucket[]): boolean {
+  return series.filter((d) => d.rate !== null).length >= 3
+}
+
+// ── Score distribution ──────────────────────────────────────────────────────────────────────
+
+export interface HistogramBin {
+  /** Inclusive lower bound. */
+  from: number
+  /** Exclusive upper bound, except the final bin which is inclusive of 100. */
+  to: number
+  count: number
+}
+
+export interface ThresholdView {
+  axis: Axis
+  threshold: number
+  bins: HistogramBin[]
+  /** Posts at or above the current threshold. */
+  atOrAbove: number
+  total: number
+  /**
+   * What moving the threshold would do, relative to now.
+   *
+   * This is the actionable number. A count tells you what happened; this tells you what WOULD
+   * happen, which is the only form in which a threshold setting can be reasoned about.
+   */
+  whatIf: Array<{ threshold: number; delta: number }>
+}
+
+const BIN_WIDTH = 10
+const WHAT_IF_POINTS = [50, 60, 65, 70, 75, 80, 85, 90, 95]
+
+/**
+ * Score distribution for one axis, with the threshold marked.
+ *
+ * Only MODEL scores are counted. A heuristic score can never hide a post (ADR-004), so including
+ * it would make the histogram describe a decision the threshold does not actually control.
+ */
+export function thresholdView(
+  rows: readonly StoredVerdict[],
+  axis: Axis,
+  threshold: number,
+): ThresholdView {
+  const scores: number[] = []
+  for (const row of rows) {
+    const signal = row.signals[axis]
+    if (signal && signal.source === 'model') scores.push(signal.score)
+  }
+
+  const bins: HistogramBin[] = []
+  for (let from = 0; from < 100; from += BIN_WIDTH) {
+    const to = from + BIN_WIDTH
+    bins.push({
+      from,
+      to,
+      count: scores.filter((s) => (to === 100 ? s >= from && s <= 100 : s >= from && s < to)).length,
+    })
+  }
+
+  const atOrAbove = scores.filter((s) => s >= threshold).length
+
+  return {
+    axis,
+    threshold,
+    bins,
+    atOrAbove,
+    total: scores.length,
+    whatIf: WHAT_IF_POINTS.filter((t) => t !== threshold).map((t) => ({
+      threshold: t,
+      delta: scores.filter((s) => s >= t).length - atOrAbove,
+    })),
+  }
+}
+
+// ── Time saved ──────────────────────────────────────────────────────────────────────────────
+
+/** Adult silent reading speed, words per minute. Deliberately conservative. */
+const WPM = 230
+/** Words in an excerpt are capped at EXCERPT_CHARS, so estimate from characters instead. */
+const CHARS_PER_WORD = 5.5
+
+/**
+ * Rough reading time avoided, in minutes.
+ *
+ * An estimate and labelled as one. Excerpts are truncated at 400 characters, so a long post is
+ * undercounted — the figure is a floor, not a measurement, and the UI should not imply otherwise.
+ */
+export function minutesSaved(rows: readonly StoredVerdict[]): number {
+  const chars = rows
+    .filter((r) => r.action === 'collapse')
+    .reduce((sum, r) => sum + r.excerpt.length, 0)
+  return chars / CHARS_PER_WORD / WPM
+}

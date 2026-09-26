@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { byAxis, feedbackByAxis, overview, routerAgreement, since, withinWindow } from './metrics'
+import {
+  byAxis,
+  dailySeries,
+  feedbackByAxis,
+  hasPlottableTrend,
+  minutesSaved,
+  overview,
+  routerAgreement,
+  since,
+  thresholdView,
+  withinWindow,
+} from './metrics'
 import type { StoredLabel, StoredVerdict } from './schema'
 import type { Axis, TriageBand } from '../core/types'
 
@@ -173,5 +184,109 @@ describe('feedbackByAxis', () => {
       ...Array.from({ length: 3 }, () => label('engagement_bait', false)),
     ]
     expect(feedbackByAxis(labels, 10)[0]!.rate).toBeCloseTo(0.7)
+  })
+})
+
+describe('dailySeries', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+
+  it('includes days with no activity — gaps are information', () => {
+    // A sparkline that omits empty days compresses time and implies continuous use.
+    const rows = [row({ at: NOW }), row({ at: NOW - 6 * DAY_MS })]
+    const series = dailySeries(rows, NOW, 7)
+    expect(series).toHaveLength(7)
+    expect(series.filter((d) => d.seen === 0).length).toBe(5)
+  })
+
+  it('withholds a daily rate below the minimum sample', () => {
+    // Hiding 1 of 2 posts is not "50% of your feed".
+    const rows = [row({ at: NOW, action: 'collapse' }), row({ at: NOW })]
+    expect(dailySeries(rows, NOW, 1)[0]!.rate).toBeNull()
+  })
+
+  it('reports a rate once a day has enough posts', () => {
+    const rows = [
+      ...Array.from({ length: 3 }, () => row({ at: NOW, action: 'collapse' })),
+      ...Array.from({ length: 7 }, () => row({ at: NOW })),
+    ]
+    expect(dailySeries(rows, NOW, 1)[0]!.rate).toBeCloseTo(0.3)
+  })
+
+  it('is ordered oldest to newest', () => {
+    const series = dailySeries([], NOW, 5)
+    for (let i = 1; i < series.length; i++) {
+      expect(series[i]!.at).toBeGreaterThan(series[i - 1]!.at)
+    }
+  })
+
+  it('drops rows outside the window rather than misattributing them', () => {
+    expect(dailySeries([row({ at: NOW - 40 * DAY_MS })], NOW, 7).every((d) => d.seen === 0)).toBe(true)
+  })
+
+  it('needs three days of real data before a trend is plottable', () => {
+    const twoDays = [
+      ...Array.from({ length: 6 }, () => row({ at: NOW })),
+      ...Array.from({ length: 6 }, () => row({ at: NOW - DAY_MS })),
+    ]
+    expect(hasPlottableTrend(dailySeries(twoDays, NOW, 7))).toBe(false)
+    const threeDays = [...twoDays, ...Array.from({ length: 6 }, () => row({ at: NOW - 2 * DAY_MS }))]
+    expect(hasPlottableTrend(dailySeries(threeDays, NOW, 7))).toBe(true)
+  })
+})
+
+describe('thresholdView — the only actionable metric', () => {
+  const scored = (score: number, source = 'model') =>
+    row({ signals: { engagement_bait: { score, source } } })
+
+  it('bins model scores', () => {
+    const v = thresholdView([scored(5), scored(15), scored(95)], 'engagement_bait', 70)
+    expect(v.total).toBe(3)
+    expect(v.bins.find((b) => b.from === 0)!.count).toBe(1)
+    expect(v.bins.find((b) => b.from === 10)!.count).toBe(1)
+    expect(v.bins.find((b) => b.from === 90)!.count).toBe(1)
+  })
+
+  it('excludes heuristic scores — the threshold does not control them', () => {
+    const v = thresholdView([scored(95, 'heuristic')], 'engagement_bait', 70)
+    expect(v.total).toBe(0)
+  })
+
+  it('counts what the current threshold catches', () => {
+    const v = thresholdView([scored(65), scored(85), scored(97)], 'engagement_bait', 70)
+    expect(v.atOrAbove).toBe(2)
+  })
+
+  it('says what LOWERING the threshold would do', () => {
+    // The actionable part: not "47 hidden" but "12 more if you moved the slider".
+    const v = thresholdView([scored(65), scored(85), scored(97)], 'engagement_bait', 90)
+    expect(v.atOrAbove).toBe(1)
+    expect(v.whatIf.find((w) => w.threshold === 60)!.delta).toBe(2)
+  })
+
+  it('says what RAISING it would do', () => {
+    const v = thresholdView([scored(65), scored(85), scored(97)], 'engagement_bait', 60)
+    expect(v.whatIf.find((w) => w.threshold === 95)!.delta).toBe(-2)
+  })
+
+  it('never lists the current threshold as a what-if', () => {
+    const v = thresholdView([scored(80)], 'engagement_bait', 70)
+    expect(v.whatIf.some((w) => w.threshold === 70)).toBe(false)
+  })
+
+  it('puts a perfect 100 in the top bin', () => {
+    const v = thresholdView([scored(100)], 'engagement_bait', 70)
+    expect(v.bins.at(-1)!.count).toBe(1)
+  })
+})
+
+describe('minutesSaved', () => {
+  it('counts only hidden posts', () => {
+    const long = 'x'.repeat(1100)
+    expect(minutesSaved([row({ action: 'collapse', excerpt: long })])).toBeGreaterThan(0)
+    expect(minutesSaved([row({ action: 'show', excerpt: long })])).toBe(0)
+  })
+
+  it('is zero for an empty set', () => {
+    expect(minutesSaved([])).toBe(0)
   })
 })

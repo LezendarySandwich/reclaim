@@ -80,3 +80,37 @@ export const SAMPLE = {
     'We migrated 400k rows off the legacy currency column on Tuesday. Took three weeks, mostly ' +
     'because of nulls nobody had documented anywhere. Thanks to Priya and Tom for the weekend session.',
 } as const
+
+/**
+ * Real captured markup from a live Datadog advert, 2026-09-26, minified as LinkedIn serves it.
+ *
+ * Kept verbatim because two plausible-looking detection approaches were disproven by it: a
+ * substring check (would hide promotion announcements) and a newline-split check (textContent has
+ * no newlines, so it reads as "Datadog 587,644 followersPromoted"). Any future change to
+ * promoted detection should be tested against this before anything hand-written.
+ *
+ * Note what it does NOT contain: no `sponsored-indicator-key`, no `data-sponsored-tracking-url`,
+ * no `data-view-tracking-scope`. The componentkeys are opaque UUIDs.
+ */
+export const REAL_PROMOTED_ACTOR_BLOCK =
+  '<a href="https://www.linkedin.com/company/datadog/" componentkey="40fd94e3">' +
+  '<figure componentkey="40fd94e3">' +
+  '<img alt="View company: Datadog" src="https://media.licdn.com/dms/image/datadog_logo">' +
+  '</figure></a>' +
+  '<div>' +
+  '<a href="https://www.linkedin.com/company/datadog/" componentkey="77a3aba0">' +
+  '<div aria-label="Datadog Verified"><p><span>Datadog</span></p></div>' +
+  '</a>' +
+  '<div><p><span>587,644 followers</span></p></div>' +
+  '<div><p componentkey="4f2424c1-c53e-4c8f-9c63-172e339627d9"><span>Promoted</span></p></div>' +
+  '</div>'
+
+/** A promoted post built from the real actor block plus ad copy. */
+export function realPromotedPostHtml(body: string): string {
+  const id = '9xKpQr2MdnVkMoPnH_c9l5ga0mViyAynFjul67OW'.padEnd(43, 'z')
+  const key = `expanded${id}FeedType_MAIN_FEED_RELEVANCE`
+  return `<div componentkey="${key}" id="${key}" role="listitem">
+    ${REAL_PROMOTED_ACTOR_BLOCK}
+    <div data-testid="expandable-text-box"><span>${body}</span></div>
+  </div>`
+}

@@ -7,7 +7,18 @@
 
 import { allAuthors, labelsForAxis, recentVerdicts } from '../../storage/db'
 import { rankOffenders } from '../../storage/aggregates'
-import { byAxis, feedbackByAxis, overview, routerAgreement, withinWindow } from '../../storage/metrics'
+import {
+  byAxis,
+  dailySeries,
+  feedbackByAxis,
+  hasPlottableTrend,
+  minutesSaved,
+  overview,
+  routerAgreement,
+  thresholdView,
+  withinWindow,
+} from '../../storage/metrics'
+import type { DayBucket } from '../../storage/metrics'
 import { ALL_AXES } from '../../core/types'
 import type { Axis, Settings } from '../../core/types'
 import type { StoredLabel, StoredVerdict } from '../../storage/schema'
@@ -323,5 +334,200 @@ export function authorsPanel(data: PanelData): HTMLElement {
         'writing style and can be wrong. It is not a claim about anyone.',
     }),
   )
+  return section
+}
+
+// ── Trend ───────────────────────────────────────────────────────────────────────────────────
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+function svg<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  attrs: Record<string, string | number>,
+): SVGElementTagNameMap[K] {
+  const node = document.createElementNS(SVG_NS, tag)
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v))
+  return node
+}
+
+/**
+ * Inline SVG sparkline. No chart library — this is a polyline, and a dependency for it would be
+ * bundle weight on an extension that has to justify its size.
+ *
+ * Plots the RATE, not the count. Counts over time mostly measure how much the user scrolled:
+ * twenty hidden today against five yesterday may only mean four times as much feed.
+ */
+function sparkline(series: DayBucket[], label: string): SVGSVGElement {
+  const W = 320
+  const H = 48
+  const PAD = 4
+  const points = series.map((d, i) => ({ d, i }))
+  const known = points.filter((p) => p.d.rate !== null)
+  const max = Math.max(0.1, ...known.map((p) => p.d.rate ?? 0))
+
+  const x = (i: number) => PAD + (i / Math.max(1, series.length - 1)) * (W - PAD * 2)
+  const y = (rate: number) => H - PAD - (rate / max) * (H - PAD * 2)
+
+  const chart = svg('svg', {
+    viewBox: `0 0 ${W} ${H}`,
+    width: '100%',
+    height: H,
+    role: 'img',
+    'aria-label': label,
+    preserveAspectRatio: 'none',
+  })
+
+  // Segment-by-segment rather than one polyline, so days with no data leave a genuine gap
+  // instead of a straight line implying continuity that did not happen.
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!
+    const b = points[i]!
+    if (a.d.rate === null || b.d.rate === null) continue
+    chart.append(
+      svg('line', {
+        x1: x(a.i), y1: y(a.d.rate), x2: x(b.i), y2: y(b.d.rate),
+        stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round',
+      }),
+    )
+  }
+  for (const p of known) {
+    chart.append(svg('circle', { cx: x(p.i), cy: y(p.d.rate ?? 0), r: 2.5, fill: 'currentColor' }))
+  }
+  return chart
+}
+
+export function trendPanel(data: PanelData): HTMLElement {
+  const section = el('section')
+  section.append(el('h2', { textContent: 'Trend' }))
+
+  const series = dailySeries(data.rows, data.now, 30)
+
+  if (!hasPlottableTrend(series)) {
+    section.append(
+      el('p', {
+        className: 'muted',
+        textContent:
+          'Not enough days yet. A trend needs at least three days with a handful of posts each — ' +
+          'anything less is a line drawn through noise.',
+      }),
+    )
+    return section
+  }
+
+  const known = series.filter((d) => d.rate !== null)
+  const first = known[0]!
+  const last = known.at(-1)!
+  const change = (last.rate ?? 0) - (first.rate ?? 0)
+
+  section.append(
+    el('div', { className: 'spark' }, [
+      sparkline(
+        series,
+        `Share of posts hidden per day over ${known.length} active days, ` +
+          `from ${pct(first.rate)} to ${pct(last.rate)}.`,
+      ),
+    ]),
+    el('p', {
+      className: 'muted',
+      textContent:
+        `Share of posts hidden per day · ${known.length} active days · ` +
+        `${pct(first.rate)} → ${pct(last.rate)}` +
+        (Math.abs(change) < 0.02 ? ' (flat)' : change > 0 ? ' (rising)' : ' (falling)'),
+    }),
+    el('p', {
+      className: 'fineprint',
+      textContent:
+        'This plots the SHARE of posts hidden, not the number. A raw count mostly tracks how much ' +
+        'you scrolled — twenty hidden today against five yesterday may just mean four times as ' +
+        'much feed. Days with fewer than five posts are left blank rather than guessed at.',
+    }),
+  )
+
+  const saved = minutesSaved(withinWindow(data.rows, data.now, 30))
+  if (saved >= 1) {
+    section.append(
+      el('p', {
+        className: 'muted',
+        textContent:
+          `Roughly ${Math.round(saved)} minutes of reading skipped in 30 days — a floor, not a ` +
+          'measurement, since only a 400-character excerpt of each post is stored.',
+      }),
+    )
+  }
+  return section
+}
+
+// ── Threshold tuning ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Score distribution against the current threshold.
+ *
+ * The most actionable panel here, and the reason is that every other metric is retrospective.
+ * A count says what happened; this says what WOULD happen if the slider moved, which is the only
+ * form in which a threshold can actually be reasoned about.
+ */
+export function thresholdPanel(data: PanelData, settings: Settings): HTMLElement {
+  const section = el('section')
+  section.append(el('h2', { textContent: 'Where the line sits' }))
+
+  const rows = withinWindow(data.rows, data.now, 30)
+  const enabled = ALL_AXES.filter((a) => settings.axes[a].mode !== 'off')
+  let rendered = 0
+
+  for (const axis of enabled) {
+    const view = thresholdView(rows, axis, settings.axes[axis].threshold)
+    if (view.total < 10) continue
+    rendered++
+
+    const max = Math.max(...view.bins.map((b) => b.count), 1)
+    const bars = el('div', { className: 'hist' })
+    for (const bin of view.bins) {
+      const above = bin.from >= view.threshold
+      const col = el('div', { className: `hist-col${above ? ' above' : ''}` })
+      const fill = el('i')
+      fill.style.height = `${(bin.count / max) * 100}%`
+      col.append(fill)
+      col.title = `${bin.from}-${bin.to}: ${bin.count} post${bin.count === 1 ? '' : 's'}`
+      bars.append(col)
+    }
+
+    section.append(
+      el('h3', { textContent: AXIS_LABEL[axis] }),
+      bars,
+      el('p', {
+        className: 'muted',
+        textContent:
+          `Threshold ${view.threshold} · ${view.atOrAbove} of ${view.total} scored posts are at ` +
+          'or above it. Bars right of the line are the ones hidden.',
+      }),
+    )
+
+    // Only offer moves that would actually change something. A list of zeroes is noise.
+    const meaningful = view.whatIf.filter((w) => w.delta !== 0).slice(0, 4)
+    if (meaningful.length > 0) {
+      section.append(
+        el('p', {
+          className: 'fineprint',
+          textContent:
+            'If you moved it: ' +
+            meaningful
+              .map(
+                (w) =>
+                  `${w.threshold} → ${w.delta > 0 ? '+' : ''}${w.delta} post${Math.abs(w.delta) === 1 ? '' : 's'}`,
+              )
+              .join(' · '),
+        }),
+      )
+    }
+  }
+
+  if (rendered === 0) {
+    section.append(
+      el('p', {
+        className: 'muted',
+        textContent: 'Needs at least ten scored posts on an axis before a distribution says anything.',
+      }),
+    )
+  }
   return section
 }

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LinkedInAdapter, outermostOnly } from './adapter'
-import { clearFeed, modernPostHtml, renderLegacyFeed, renderModernFeed } from './fixtures'
+import {
+  clearFeed,
+  modernPostHtml,
+  realPromotedPostHtml,
+  renderLegacyFeed,
+  renderModernFeed,
+} from './fixtures'
 import type { PostFixture } from './fixtures'
 
 /** Shared fixtures live in ./fixtures.ts so LinkedIn DOM knowledge stays inside the adapter. */
@@ -320,5 +326,49 @@ describe('promoted detection must not eat promotion announcements', () => {
     adapter.detectProfile(document)
     const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
     expect(adapter.extract(el)!.post.isPromoted).toBe(true)
+  })
+})
+
+describe('promoted detection against REAL captured ad markup', () => {
+  it('detects the Datadog ad', () => {
+    // The fixture is verbatim from a live ad. Two earlier approaches passed hand-written tests
+    // and failed on this: a substring check, and a newline-split check.
+    renderModernFeed([
+      realPromotedPostHtml('See how leading SRE teams delegate routine incident triage to AI agents.'),
+    ])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(true)
+  })
+
+  it('confirms textContent has no newlines, which is why line-splitting failed', () => {
+    renderModernFeed([realPromotedPostHtml('Ad copy.')])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    const tc = el.textContent ?? ''
+    expect(tc).toContain('followersPromoted') // no separator between block elements
+  })
+
+  it('still does not fire on a promotion announcement in the same feed', () => {
+    renderModernFeed([
+      modernPostHtml({
+        id: 'promotionannouncementaaaaaaaaaaaaaaaaaaaaaa',
+        body: 'Thrilled to share that I was promoted to Senior Engineer this week.',
+      }),
+    ])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(false)
+  })
+
+  it('distinguishes an ad from an ordinary post in a mixed feed', () => {
+    renderModernFeed([
+      realPromotedPostHtml('Transform poor quality data into secure, trusted, unified data.'),
+      modernPostHtml({ id: 'ordinarypostbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', body: 'We shipped it Tuesday.' }),
+    ])
+    adapter.detectProfile(document)
+    const posts = adapter.findPosts(adapter.findFeedRoot(document)!)
+    const flags = posts.map((p) => adapter.extract(p)!.post.isPromoted)
+    expect(flags).toEqual([true, false])
   })
 })
