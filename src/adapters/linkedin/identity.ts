@@ -82,9 +82,9 @@ export interface IdentityInput {
   /** Attribute values worth scanning for a URN, in preference order. */
   urnCandidates: ReadonlyArray<string | null | undefined>
   /** href of the post permalink, if one is rendered. S4: none are, on the modern feed. */
-  permalink?: string | null
+  permalink?: string | null | undefined
   /** `componentkey` from the POST ROOT only — never a descendant's template key. */
-  componentKey?: string | null
+  componentKey?: string | null | undefined
   authorUrn: string
   text: string
   /**
@@ -93,7 +93,7 @@ export interface IdentityInput {
    * S4 found NO `<time>` element and no timestamp selector that matched, so on the modern feed
    * this is usually absent and composite ids cannot use it to disambiguate reposts.
    */
-  timestamp?: string | null
+  timestamp?: string | null | undefined
 }
 
 /**

@@ -8,12 +8,13 @@ Living. Tick on completion, **append on discovery**. See `../../../AGENTS.md`.
 - [x] `src/adapters/linkedin/selectors.ts` — bundled candidate profiles + 20-locale Promoted labels
 - [x] `src/adapters/linkedin/identity.ts` — URN → permalink → composite derivation
 - [x] `src/adapters/linkedin/identity.test.ts`
-- [ ] `src/adapters/linkedin/adapter.ts` — S4 has landed; no longer blocked
-- [ ] Text extraction hygiene (exclude comments and social proof, `<br>` → `\n`, expand see-more
-      from a clone without clicking)
-- [ ] Feed observer: IntersectionObserver at `rootMargin: '1500px 0px'` as the triage gate,
-      MutationObserver coalesced through one rAF
-- [ ] Infinite-scroll fix
+- [x] `src/adapters/linkedin/adapter.ts` — built against verified selectors
+- [x] Text extraction hygiene — social proof and comments excluded, the "… more" toggle stripped,
+      `<br>` → `\n`, all on a CLONE so the live page is never mutated (asserted)
+- [x] Feed observer (`src/content/watcher.ts`): IntersectionObserver at `rootMargin: '1500px 0px'`
+      as the triage gate, MutationObserver coalesced through one rAF, state keyed by post id
+- [x] Infinite-scroll safety — the stub never sets `display:none` on the row, so LinkedIn's
+      IntersectionObserver sentinel keeps firing. Not yet verified on a live feed.
 - [ ] HTML fixtures captured from a real feed, for regression tests
 
 ## Verification
@@ -110,3 +111,39 @@ template keys (`body-key`) cannot collide the way prior art's does.
       post id. That is correct under either answer, so this does not block `adapter.ts` — but the
       audit script needs fixing before the answer is worth having.
 - [ ] Only 8 posts were in the DOM. Everything above is a small sample.
+
+
+## Adapter build notes — 2026-09-26
+
+- [x] `outermostOnly()` is what turns the post selector into a post list: S4 saw 27 raw matches
+      for 8 real posts, the rest being inner components carrying the same key fragment.
+- [x] Author URLs are normalised (query stripped, trailing slash removed) because the raw href
+      carries `?trk=feed_and_more` tracking params that differ between renders — ungrouped, the
+      leaderboard would count one person as several.
+- [x] **State is keyed by post id, never by element.** S4's recycling test was invalid, so we do
+      not know whether LinkedIn reuses nodes. The watcher also re-extracts before classifying and
+      drops the entry if the node now holds a different post — correct under either answer.
+- [x] Shared fixtures moved to `fixtures.ts` inside this directory. `tests/invariants.test.ts`
+      caught the watcher test building LinkedIn-shaped DOM in a site-agnostic module, which is
+      exactly the coupling that rule exists to prevent. Fixing the cause also removed a duplicated
+      fixture across two test files.
+
+## Discovered — not done
+
+- [ ] `isRepost` is inferred from "more than one author link", which is a guess. S4 had no
+      reposts in the sample. Untested and probably wrong for company posts with a mentioned person.
+- [ ] Media detection is scoped to `media.licdn.com`, which is UNVERIFIED — no post in the S4
+      sample had an attached image. A bare `img` matched 8/8 but that is avatars and reaction
+      icons, so it is useless as a signal.
+- [ ] The watcher never re-classifies. Once a post is `done` it stays done for the tab's lifetime,
+      even if the model later becomes available. A post seen while `needs_setup` is therefore
+      never revisited — needs an invalidation hook on engine-state change.
+- [ ] No verdict cache read. `classifyBatch` produces a cache key and nothing consults it, so
+      scrolling back over a post re-runs inference. Storage exists; the wire does not.
+- [ ] Nothing persists verdicts or labels yet, so the dashboard has no data and the leaderboard
+      cannot be built.
+- [ ] `onFeedback` is wired through the watcher and called on expand, but the content script
+      passes no handler, so feedback is silently dropped.
+- [ ] The SPA retry is a fixed 20 × 500ms poll. Crude. LinkedIn client-side navigations away from
+      and back to the feed are not handled at all — `webNavigation` is permissioned for exactly
+      this and unused.
