@@ -211,3 +211,30 @@ describe('stub mounting', () => {
     expect(el.querySelector('[data-reclaim-stub]')).toBeNull()
   })
 })
+
+describe('LinkedIn’s own aria-hidden see-more button', () => {
+  // LinkedIn marks data-testid="expandable-text-button" as aria-hidden="true" while leaving it
+  // focusable — their accessibility bug, surfaced by a Chrome console warning. What matters to
+  // us is that it is inside the body container, so `textContent` would append "… more" to every
+  // truncated post and feed it to the model as if it were content.
+  it('strips it from extracted text', () => {
+    modernFeed([modernPost({ body: 'The real post content.', seeMore: true })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    const text = adapter.extract(el)!.post.text
+    expect(text).toBe('The real post content.')
+    expect(text).not.toContain('more')
+  })
+
+  it('leaves the real button on the page untouched', () => {
+    // We read; we do not rewrite. Their bug is theirs to fix, and silently mutating a host page's
+    // accessibility attributes would be worse than leaving it alone.
+    modernFeed([modernPost({ body: 'Content.', seeMore: true })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    adapter.extract(el)
+    const button = el.querySelector('[data-testid="expandable-text-button"]')
+    expect(button).not.toBeNull()
+    expect(button!.getAttribute('aria-hidden')).toBe('true')
+  })
+})

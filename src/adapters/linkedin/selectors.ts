@@ -64,8 +64,15 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
         '[componentkey="social-actions-key"]',
         '[data-testid="comments-container"]',
       ],
-      // S4: 88% (7/8), label "… more".
-      seeMoreToggle: ['[data-testid="expandable-text-box"] button', 'button[aria-label*="more" i]'],
+      // S4: 88% (7/8), label "… more". The precise testid was learned from a console warning
+      // LinkedIn emits about its own markup — they set aria-hidden="true" on this button while
+      // leaving it focusable, which is their bug, not ours. Useful to us either way: it is the
+      // exact node that must be stripped from extracted text.
+      seeMoreToggle: [
+        '[data-testid="expandable-text-button"]',
+        '[data-testid="expandable-text-box"] button',
+        'button[aria-label*="more" i]',
+      ],
       // S4: a bare `img` hit 8/8 but that includes avatars and reaction icons, so it is useless
       // as a "has media" signal. Scoped to the CDN path instead — UNVERIFIED, because no post in
       // the sample had an attached image.

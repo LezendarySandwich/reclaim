@@ -44,7 +44,7 @@ export function modernPostHtml(options: PostFixture = {}): string {
       ${options.promotedLabel ? `<span>${options.promotedLabel}</span>` : ''}
       <div data-testid="expandable-text-box">
         <span>${options.body ?? 'A perfectly ordinary post about shipping software.'}</span>
-        ${options.seeMore ? '<button>… more</button>' : ''}
+        ${options.seeMore ? '<button data-testid="expandable-text-button" aria-hidden="true">… more</button>' : ''}
       </div>
       ${options.media ? '<img src="https://media.licdn.com/dms/image/abc" />' : ''}
       ${options.socialProof ? `<div componentkey="social-proof-bar-key">${options.socialProof}</div>` : ''}
