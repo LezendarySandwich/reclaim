@@ -4,6 +4,8 @@ import {
   clearFeed,
   modernPostHtml,
   followedPageAdHtml,
+  showcaseImageAdHtml,
+  textLightHumanPostHtml,
   realPromotedPostHtml,
   renderLegacyFeed,
   socialContextPostHtml,
@@ -132,11 +134,16 @@ describe('extraction', () => {
     expect(firstPost()!.post.media[0]!.kind).toBe('image')
   })
 
-  it('flags an unfilled lazy-mounted row as pending rather than classifying it', () => {
+  it('treats an author-only render as rendered, not as an unfilled row', () => {
+    // This fixture has a full actor block and an empty body, which is a rendered card — somebody
+    // posting an image with no caption — not a lazy-mount hole. It used to report pending purely
+    // because the body was short, and that rule made a whole category of image advert
+    // permanently unhideable. A genuinely empty slot is covered separately below.
     modernFeed([modernPost({ body: '' })])
     const result = firstPost()
-    // No text yet. Extends fail-open: no model means hide nothing, no text means do not triage.
-    expect(result?.pending ?? true).toBe(true)
+    expect(result?.pending).toBe(false)
+    // Nothing about it is promoted, so nothing may hide it.
+    expect(result?.post.isPromoted).toBe(false)
   })
 
   it('gives distinct ids to distinct posts', () => {
@@ -466,5 +473,63 @@ describe('a promoted post inside a follow banner', () => {
     adapter.detectProfile(document)
     const after = adapter.extract(adapter.findPosts(adapter.findFeedRoot(document)!)[0]!)?.post.id
     expect(after).toBe(before)
+  })
+})
+
+
+describe('a showcase image advert whose body is one emoji', () => {
+  // Reported miss, and unconditional rather than a race: pending was derived from text length
+  // alone, so this ad looked like an unpopulated lazy-mount slot on every single scan.
+  it('is not pending, despite having almost no text', () => {
+    renderModernFeed([showcaseImageAdHtml()])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    const extracted = adapter.extract(el)!
+    expect(extracted.post.text.length).toBeLessThan(8)
+    expect(extracted.pending).toBe(false)
+  })
+
+  it('is detected as promoted', () => {
+    renderModernFeed([showcaseImageAdHtml()])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(true)
+  })
+
+  it('attributes it to the showcase page', () => {
+    renderModernFeed([showcaseImageAdHtml()])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.authorName).toBe('AWS Developers')
+  })
+
+  it('is still promoted with no label, via the sponsored creative alt text', () => {
+    // LinkedIn writes "View Sponsored Content" as the accessible name of an ad creative. It is a
+    // second structural signal that does not wait for the label to hydrate.
+    renderModernFeed([showcaseImageAdHtml({ promotedLabel: false })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(true)
+  })
+
+  it('leaves a human photo post with a two-character caption alone', () => {
+    // The control. Letting text-light posts reach the router is only safe because the router
+    // clears them - nothing here is promoted, so nothing may hide it.
+    renderModernFeed([textLightHumanPostHtml()])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    const extracted = adapter.extract(el)!
+    expect(extracted.pending).toBe(false)
+    expect(extracted.post.isPromoted).toBe(false)
+    expect(extracted.post.authorName).toBe('Dana Okafor')
+  })
+
+  it('still reports a genuinely empty lazy-mount slot as pending', () => {
+    // The behaviour the old rule was actually protecting, which must survive.
+    renderModernFeed(['<div componentkey="expandedemptyslotaaaaaaaaaaaaaaaaaaaaaaaaaaaaaFeedType_MAIN_FEED_RELEVANCE" role="listitem" data-lazy-mount-id="1"></div>'])
+    adapter.detectProfile(document)
+    const posts = adapter.findPosts(adapter.findFeedRoot(document)!)
+    expect(posts).toHaveLength(1)
+    expect(adapter.extract(posts[0]!)?.pending).toBe(true)
   })
 })

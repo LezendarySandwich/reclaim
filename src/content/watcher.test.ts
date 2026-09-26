@@ -7,6 +7,8 @@ import {
   REAL_PROMOTED_COMPANY_ACTOR,
   firstPostElement,
   followedPageAdHtml,
+  showcaseImageAdHtml,
+  textLightHumanPostHtml,
   modernPostHtml,
   renderModernFeed,
 } from '../adapters/linkedin/fixtures'
@@ -334,5 +336,64 @@ describe('late hydration', () => {
 
     expect(classify.mock.calls.length).toBeGreaterThan(0)
     expect(classify.mock.calls.length).toBeLessThanOrEqual(3)
+  })
+})
+
+
+describe('text-light posts reach the pipeline', () => {
+  it('classifies an image advert whose whole body is one emoji', async () => {
+    // The reported miss. pending was derived from text length alone, so this ad was skipped by
+    // "if (pending) continue" on every scan and could never be hidden by any path.
+    renderModernFeed([showcaseImageAdHtml()])
+    const classify = vi.fn(async (_posts: TriagedPost[]): Promise<Verdict[]> => [])
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
+    FakeIO.instances[0]!.fireAll()
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(classify).toHaveBeenCalledOnce()
+    expect(classify.mock.calls[0]![0][0]!.post.isPromoted).toBe(true)
+  })
+
+  it('never hides a human photo post with a two-character caption', async () => {
+    // The control for the fix above. It DOES reach the model - posts under MIN_WORDS route to
+    // `ambiguous` by design, because rate features are noise at that length - so the guarantee
+    // that matters is not "untouched" but "not hidden": nothing about it is promoted, and the
+    // model has no text to flag.
+    renderModernFeed([textLightHumanPostHtml()])
+    const classify = vi.fn(async (posts: TriagedPost[]): Promise<Verdict[]> =>
+      posts.map((p) => ({
+        postId: p.post.id,
+        signals: {},
+        action: 'show' as const,
+        triggeredBy: [],
+        engineId: 'gemini-nano',
+        rulesVersion: 'r1',
+      })),
+    )
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
+    FakeIO.instances[0]!.fireAll()
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(classify.mock.calls[0]?.[0][0]?.post.isPromoted).toBe(false)
+    expect(document.querySelector('[data-reclaim-stub]')).toBeNull()
+  })
+
+  it('reopens a post that gains a short body after rendering author-first', async () => {
+    // Gap opened by the fix above: a card can now be routed on empty text, and a body arriving
+    // later may be shorter than TEXT_GROWTH_THRESHOLD. Text appearing at all has to count.
+    renderModernFeed([modernPostHtml({ id: 'authorfirstaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', body: '' })])
+    const classify = vi.fn(async (_posts: TriagedPost[]): Promise<Verdict[]> => [])
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(classify).not.toHaveBeenCalled()
+
+    // A short bait body - well under the 40-character growth threshold.
+    firstPostElement().querySelector('[data-testid="expandable-text-box"]')!.textContent =
+      'Comment "YES" below and I will send it'
+    await new Promise((r) => setTimeout(r, 20))
+    FakeIO.instances[0]!.fireAll()
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(classify).toHaveBeenCalled()
   })
 })

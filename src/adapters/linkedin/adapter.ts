@@ -19,13 +19,40 @@ const SITE = 'linkedin'
 const SEEN_ATTR = 'data-reclaim-id'
 
 /**
- * Below this many characters we treat a post as not yet filled.
+ * Below this many characters, a post's text does not count as present.
  *
  * LinkedIn mounts feed rows as empty slots (`data-lazy-mount-id`) and populates them later, so a
  * post container can legitimately exist with no content. Classifying those would feed the model
  * blanks; the observer re-evaluates on the next mutation instead.
+ *
+ * This is a fact about the TEXT only. See `isPending` for why that is not the same as the post
+ * not having rendered.
  */
 const MIN_READY_CHARS = 8
+
+/**
+ * Has this row rendered at all?
+ *
+ * Text length alone is the wrong test, and getting that wrong hid nothing for a whole category of
+ * advert. A reported AWS ad's entire body was a single emoji — two characters — carried by an
+ * image. Judged on text it looks exactly like an unpopulated lazy-mount slot, so `pending` stayed
+ * true and the watcher skipped it on every scan, forever. It was never a race: that ad could
+ * never be hidden at all.
+ *
+ * A row has rendered if it has any of the four things a rendered row can have: body text, media,
+ * an author, or a "Promoted" label. Only a row with none of them is still a hole.
+ *
+ * This deliberately lets text-light posts through to the router, which is safe because the router
+ * clears them: a post with two characters cannot reach `MIN_WORDS`, so it bands `clean` and is
+ * shown. The only thing that then hides it is a structural signal that needs no text at all —
+ * which is precisely the advert case, and precisely ADR-026's carve-out.
+ */
+function isPending(post: Pick<Post, 'text' | 'media' | 'authorName' | 'isPromoted'>): boolean {
+  if (post.text.length >= MIN_READY_CHARS) return false
+  if (post.media.length > 0) return false
+  if (post.authorName.length > 0) return false
+  return !post.isPromoted
+}
 
 function profileFor(root: Document): SelectorProfile | null {
   for (const profile of BUNDLED_SELECTORS.profiles) {
@@ -138,6 +165,11 @@ function readAuthor(postEl: Element, profile: SelectorProfile): { name: string; 
     try {
       for (const candidate of postEl.querySelectorAll(sel)) {
         if (inSocialContext(candidate, postEl, profile)) continue
+        // Skip candidates with no text. An actor block opens with the logo link — an anchor to
+        // the same profile wrapping only an <img> — and matching it first meant the real name a
+        // few nodes later was never reached, silently demoting every company and showcase post
+        // to the slug-derived fallback ("Aws Developers" for AWS Developers).
+        if (!(candidate.textContent ?? '').trim()) continue
         nameEl = candidate
         break
       }
@@ -315,7 +347,7 @@ export class LinkedInAdapter implements SiteAdapter {
       site: SITE,
     }
 
-    return { post, pending: text.length < MIN_READY_CHARS }
+    return { post, pending: isPending(post) }
   }
 
   /**

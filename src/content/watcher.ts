@@ -75,6 +75,15 @@ const MAX_REOPENS = 3
  */
 const TEXT_GROWTH_THRESHOLD = 40
 
+/**
+ * Below this many characters a post effectively has no text.
+ *
+ * Text arriving at all is news regardless of how much of it there is, because the adapter now
+ * reports a row as rendered once it has an author or media — so a post can legitimately be routed
+ * on empty text and then gain a short body that `TEXT_GROWTH_THRESHOLD` alone would ignore.
+ */
+const EFFECTIVELY_EMPTY = 8
+
 export interface WatcherDeps {
   adapter: SiteAdapter
   /** Sends a batch for classification. Returns verdicts, or rejects. */
@@ -268,9 +277,13 @@ export class FeedWatcher {
     const now = this.#evidenceOf(post)
     if (now === before) return false
 
-    const [wasPromoted, wasLength] = before.split(':') as [string, string]
+    const [wasPromoted, wasLengthRaw] = before.split(':') as [string, string]
     if (post.isPromoted && wasPromoted !== 'p') return true
-    return post.text.length - Number(wasLength) >= TEXT_GROWTH_THRESHOLD
+
+    const wasLength = Number(wasLengthRaw)
+    // Text appearing where there was none is news at any size.
+    if (wasLength < EFFECTIVELY_EMPTY && post.text.length >= EFFECTIVELY_EMPTY) return true
+    return post.text.length - wasLength >= TEXT_GROWTH_THRESHOLD
   }
 
   #enqueue(el: Element): void {

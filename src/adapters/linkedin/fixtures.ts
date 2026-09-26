@@ -185,6 +185,64 @@ export function followedPageAdHtml(withLabel = true): string {
 }
 
 /**
+ * An image advert from a LinkedIn *showcase* page whose entire body is one emoji.
+ *
+ * Reported as never hiding, and unlike the previous two misses this one was unconditional rather
+ * than a race. Three things about it were each individually enough to break the pipeline:
+ *
+ *  1. The body is a single 👇 — two characters. `pending` was derived from text length alone, so
+ *     the row looked like an unpopulated lazy-mount slot and the watcher skipped it on every
+ *     scan. It could never be hidden at all.
+ *  2. The actor is `/showcase/aws-developers/`. Showcase pages were in neither author chain, so
+ *     the author extracted as the empty string.
+ *  3. The creative carries `alt="View Sponsored Content"` — LinkedIn's own accessible name for an
+ *     ad, and a second structural sponsored signal that does not depend on the label hydrating.
+ */
+export function showcaseImageAdHtml(options: { body?: string; promotedLabel?: boolean } = {}): string {
+  const id = 'AwSdEvXq11HQ67jV7JvMnQVCYS0k_6MsE4vHtxPwQQQ'
+  const key = `update-card-focus${id}FeedType_MAIN_FEED_RELEVANCE`
+  const label = options.promotedLabel === false
+    ? ''
+    : '<div><p componentkey="d57f555f"><span>Promoted</span></p></div>'
+  return `<div componentkey="${key}" id="${key}" role="listitem">` +
+    '<div>' +
+      '<a href="https://www.linkedin.com/showcase/aws-developers/"><figure>' +
+        '<img alt="View company: AWS Developers" src="https://media.licdn.com/dms/image/aws_developers_logo">' +
+      '</figure></a>' +
+      '<div><div><div><div>' +
+        '<a href="https://www.linkedin.com/showcase/aws-developers/">' +
+          '<div><div aria-label="AWS Developers "><div><div><p><span>AWS Developers</span></p></div></div></div></div>' +
+        '</a>' +
+      '</div></div>' +
+      '<div><p><span>70,713 followers</span></p></div>' +
+      label +
+      '</div>' +
+      '<button type="button" aria-label="Open control menu for post by AWS Developers"><span></span></button>' +
+    '</div>' +
+    `<p componentkey="02932678"><span data-testid="expandable-text-box">${options.body ?? '\u{1F447}'}</span></p>` +
+    '<img alt="View Sponsored Content" src="https://media.licdn.com/dms/image/v2/D4E10AQE68fHE_7jq9Q/image-shrink_1280/0/1788836386598">' +
+  '</div>'
+}
+
+/**
+ * A human's photo post with almost no caption.
+ *
+ * The control for `showcaseImageAdHtml`. Letting text-light posts reach the router is only safe
+ * if the router clears them, and this is the shape that would suffer if it did not: someone
+ * posting a picture with a two-character caption must stay visible.
+ */
+export function textLightHumanPostHtml(body = '\u{1F447}'): string {
+  const id = 'humanphotopostaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'.slice(0, 43)
+  const key = `expanded${id}FeedType_MAIN_FEED_RELEVANCE`
+  return `<div componentkey="${key}" id="${key}" role="listitem">` +
+    '<div><a href="/in/dana-okafor/" aria-label="View Dana Okafor\u2019s profile">' +
+      '<span aria-hidden="true">Dana Okafor</span></a></div>' +
+    `<p><span data-testid="expandable-text-box">${body}</span></p>` +
+    '<img alt="" src="https://media.licdn.com/dms/image/holiday-photo">' +
+  '</div>'
+}
+
+/**
  * A "X commented on this" card: the commenter's profile link appears BEFORE the author's.
  *
  * Reconstructed from a real reported miss where the stub named Ivan Slater, who had commented,

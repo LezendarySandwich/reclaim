@@ -48,11 +48,16 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
       // No inner content wrapper exists on this build — the post root IS the container.
       postContent: [],
       // S4: 75% (6/8). The two misses are company posts, covered by the authorLink chain.
+      // `/showcase/` is a company sub-page (AWS Developers, Google Cloud Security and so on) and
+      // advertisers post from them. It was missing, so those posts extracted an EMPTY author —
+      // which the stub renders as "this author" and the leaderboard cannot aggregate at all.
       authorName: [
         'a[href*="/in/"] span[aria-hidden="true"]',
         'a[href*="/company/"] span[aria-hidden="true"]',
+        'a[href*="/showcase/"] span[aria-hidden="true"]',
         'a[href*="/in/"]',
         'a[href*="/company/"]',
+        'a[href*="/showcase/"]',
       ],
       // S4: /in/ 75%, /company/ 38%. Together they cover the feed.
       //
@@ -63,8 +68,10 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
       authorLink: [
         'a[aria-label^="View "][href*="/in/"]',
         'a[aria-label^="View "][href*="/company/"]',
+        'a[aria-label^="View "][href*="/showcase/"]',
         'a[href*="/in/"]',
         'a[href*="/company/"]',
+        'a[href*="/showcase/"]',
       ],
       // S4: 100% (8/8). The single most reliable selector on the whole page.
       bodyText: ['[data-testid="expandable-text-box"]'],
@@ -103,10 +110,15 @@ export const BUNDLED_SELECTORS: SelectorConfig = {
       // On this build the standalone "Promoted" text label is the ONLY signal. These are kept
       // because LinkedIn ships two feeds and filter-list maintainers still carry rules for them,
       // so they may match elsewhere — but nothing here should be relied on.
+      // The one exception is the alt text below, captured from a live AWS ad. LinkedIn writes
+      // "View Sponsored Content" as the accessible name of an ad's creative — its own word for
+      // it, on an attribute a user cannot author. It is a genuine second structural signal, and
+      // it survives the case where the "Promoted" label has not hydrated yet.
       sponsored: [
         '[componentkey="sponsored-indicator-key"]',
         '[data-sponsored-tracking-url]',
         '[data-view-tracking-scope*="SPONSORED"]',
+        'img[alt="View Sponsored Content"]',
       ],
       // S4: 0/8. No post permalink is rendered in the feed at all, so the `permalink` identity
       // strategy is unavailable on this build without opening each post's control menu.
