@@ -24,6 +24,7 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@webext-core/fake-browser": "2.0.1",
+    "fake-indexeddb": "^6.2.5",
     "happy-dom": "20.14.5",
     "typescript": "5.9.3",
     "vite": "8.3.1",

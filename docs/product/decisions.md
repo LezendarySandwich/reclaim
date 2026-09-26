@@ -297,3 +297,181 @@ checklist is the handoff. The discovery half matters more than the completion ha
 that only shrinks is hiding what was found and not written down.
 
 See `AGENTS.md` for the binding version.
+
+---
+
+## ADR-018 — The Prompt API engine lives in the service worker, not the offscreen document
+**2026-09-26 · Accepted · supersedes ADR-009 for the Gemini Nano path**
+
+ADR-009 was backwards. It rested on "the Prompt API is unavailable in MV3 service workers", which
+is wrong for extensions, and the correction inverts which context is privileged.
+
+`chrome_content_renderer_client.cc` force-enables `AIPromptAPIForWorkers` for any renderer launched
+with `--extension-process`, under the comment "These Web API features are exposed in extensions".
+MV3 service workers run in the extension's own renderer process, so `LanguageModel` is available
+there. And the user-gesture gate is `if (window && RequiresUserActivation(availability) && …)` —
+`LocalDOMWindow::From()` is null in a worker, so the check is skipped entirely, while an **offscreen
+document is a Window with a frame that can never receive user input** and therefore can *never*
+call `create()` while availability is `"downloadable"`.
+
+| Context | `LanguageModel` | `create()` when `downloadable` |
+|---|---|---|
+| Service worker | ✅ | ✅ no gesture needed |
+| Extension page | ✅ | ✅ with a real click |
+| Offscreen document | ✅ exposed | ❌ never |
+
+**Decision:** Prompt API engine in the service worker. The offscreen document is retained **only**
+for WebLLM, which genuinely needs it (service workers lack WASM/Workers/Atomics). Two backends,
+two hosts — so the `classify(posts) → verdicts` message boundary must keep the host a one-line swap.
+
+Corroborating: a GitHub search for `chrome.offscreen` + `LanguageModel` returns zero results, and
+Google's own samples use the service worker or a side panel, never offscreen.
+
+**Unresolved, and it is the one argument left for offscreen:** service workers die after ~30s idle
+and sessions do not survive. `create()` cost on wake is real and unmeasured — spike A2.
+
+**Also:** downloads still start from an extension page behind a real click. The service worker
+*can* do it gesture-free, but a multi-gigabyte download deserves explicit consent. Treat the
+gesture rule as a UX floor we choose to honour, not a constraint to route around.
+
+---
+
+## ADR-019 — `engagement_bait` ships default-on; `ai_written` ships shadow-only
+**2026-09-26 · Accepted · refines ADR-001**
+
+`ai_written` is scored and recorded but hides nothing in v1. It is exposed only as an opt-in,
+off-by-default experimental toggle with an explicit unreliability panel. `engagement_bait` is the
+default-on axis.
+
+**Why — the literature is not close:**
+- At 50 tokens, published zero-shot detectors score AUC 0.16–0.73; perplexity and DetectGPT are
+  frequently *below chance*. Our range is 50–400 words.
+- On the balanced READER benchmark, prompted frontier models score 0.53–0.73 accuracy against a
+  0.50 chance baseline. A **fine-tuned** 1.5B model scores 0.953. The constraint is the training
+  objective, not parameter count — a prompted Gemini Nano will not beat 0.73.
+- Liang et al. measured a **61.22% false-positive rate** on TOEFL essays across seven commercial
+  detectors, and a 2026 mechanistic paper shows this is structural: detectors "rate the median
+  formal-native human essay as 99.5% likely AI". LinkedIn is the most formal-register platform
+  there is. This is our dominant failure mode, not an edge case.
+
+Engagement bait is a different kind of problem — the text states its own intent ("comment YES for
+the template"), the user can verify a flag instantly, and a false positive is embarrassing rather
+than defamatory. Lead with the axis we can actually deliver.
+
+**Consequences:**
+- Never render a confidence percentage. Detectors are badly calibrated out of distribution and
+  OpenAI specifically warned they become "extremely confident in a wrong prediction".
+- Never phrase a verdict as a factual claim about a named person's post. "Looks templated", not
+  "AI-written".
+- The leaderboard must never name a creator on the `ai_written` axis alone. It is an accusation
+  surface by construction, and the evidence says we would aim it disproportionately at non-native
+  English speakers.
+- `ai_written` should eventually be ternary — human / assisted / generated — and hide only
+  "generated". The modal LinkedIn post is human content run through an assistant.
+- Thumbs feedback closes the loop for `engagement_bait` only. For `ai_written` it is an
+  *annoyance* label: a 25M-comment study found human AI-accusations uncorrelated with the actual
+  statistical signal, so auto-tuning on thumbs would train a "posts I find annoying" classifier
+  and then label its output "AI-written".
+- Thresholds are per-word-count bucket, never one global scalar.
+
+Default-on `ai_written` needs a fine-tuned small classifier, not a better prompt. That is a
+roadmap item, not a tuning task.
+
+---
+
+## ADR-020 — Consent gate before any post text is read
+**2026-09-26 · Accepted**
+
+No content script runs, and no post text is read, until the user has given an affirmative in-product
+consent. Implementation: register the content script **dynamically** via `chrome.scripting` after
+consent, not statically in the manifest, and request the LinkedIn host permission as an
+**optional** permission during onboarding rather than at install.
+
+**Why:** the Chrome Web Store User Data policy changed in July 2026 (confirmed by Wayback-diff;
+landed 2026-06-28 → 2026-07-03). Google deleted the qualifier "personal or sensitive" from "user
+data" throughout, added an FAQ entry stating local-only storage still requires disclosure, and
+**deleted the exemption** for data handling "closely related to functionality described
+prominently". Under the old rules we were exempt. We are not now. A static `content_scripts` entry
+handles user data pre-consent.
+
+Also required: a live privacy-policy URL and the Limited Use statement. Storing everything locally
+does not avoid any of this.
+
+---
+
+## ADR-021 — Zero network requests to linkedin.com, ever
+**2026-09-26 · Accepted**
+
+We read only what the page has already rendered. No `fetch`, no Voyager API, no prefetch, no
+speculative expansion of truncated text via the network.
+
+**Why, and it is two reasons.** LinkedIn's "Prohibited software and extensions" page bans, verbatim,
+"browser extensions that scrape, modify the appearance of, or automate activity on LinkedIn's
+website", and UA §8.2 names "Overlay or otherwise modify the Services or their appearance". There
+is no display-only carve-out — v1 breaches the UA and no reading of the text avoids that. The
+remedy runs against **the member's account**, not us.
+
+So the risk is borne by our users, which makes minimising it an obligation rather than a
+preference. A purely passive DOM reader is close to undetectable server-side. One extra XHR is a
+fingerprint. This is an architectural commitment, and any future feature that wants a network call
+to LinkedIn needs a new ADR that argues past this one.
+
+We also disclose it plainly in onboarding rather than burying it — see `docs/product/vision.md`.
+
+(For the record, `hiQ v. LinkedIn` is not the shield it is usually cited as: the CFAA holding
+survives but the district court held hiQ breached the UA as a matter of law, ending in a $500,000
+consent judgment and a permanent injunction.)
+
+---
+
+## ADR-022 — WebLLM for the optional tier; transformers.js is rejected
+**2026-09-26 · Accepted · refines ADR-003**
+
+**Remote-hosted code:** model *weights* are data, not code — Chrome's RHC guidance says "It does
+not include data". Defensible. **WASM from a CDN is categorically a violation**, and MV3's CSP will
+not let us allowlist one. Both libraries fetch WASM from a non-extension origin by default, so both
+need a build-time fix.
+
+WebLLM's fix is cheap: vendor the per-model `*-webgpu.wasm` (~5.3 MB each) and point `model_lib` at
+a relative path — `engine.ts` already has a non-http branch. Transformers.js needs ~27 MB of
+vendored onnxruntime WASM plus a `wasmPaths` override merely to be legal, and its default points at
+remote JavaScript on jsDelivr, which is the most clear-cut violation possible.
+
+**Rejected on merits too, not just packaging.** The best available detector checkpoint
+(`onnx-community/tmr-ai-text-detector-ONNX`, 126 MB int8) is trained on news/Wikipedia/Reddit and
+its own model card warns of elevated false positives on "casual conversation, short text" — i.e.
+LinkedIn posts. A binary human/AI classifier also cannot produce the one-line reason the collapsed
+stub promises, and no public checkpoint covers engagement bait at all, which is half the product.
+
+Default model `Qwen3-0.6B-q4f16_1-MLC` (~350 MB download, 1403 MB VRAM), laddering to
+`Qwen2.5-1.5B-Instruct-q4f16_1-MLC` and `Llama-3.2-3B-Instruct-q4f16_1-MLC`. Gate on
+`vram_required_MB`, **not** `low_resource_required` — that flag is true even for an 8B model.
+
+If we later want a cheap always-on scorer, the better move is WebLLM's own embedding tier plus a
+classifier head trained on our own feedback data. Same stack, no second runtime.
+
+---
+
+## ADR-023 — Selectors ship as a remotely-updatable config that fails closed
+**2026-09-26 · Accepted**
+
+LinkedIn's modern feed uses 8-hex build-hash class names that change every deploy, and a maintained
+comparable project shows a selector-affecting fix every 1–3 weeks. A Chrome Web Store update per
+fix is not viable, so selectors live in a JSON config fetchable from our own origin.
+
+**This is the one sanctioned outbound request, and it is tightly bounded:**
+- To our origin only — never LinkedIn (ADR-021).
+- It **sends nothing**. No query parameters, no identifiers, no version telemetry, no cookies. A
+  static file fetch, indistinguishable between users.
+- It **fails closed** to the selectors bundled in the extension. A fetch failure must never mean
+  "hide nothing incorrectly" or "hide the wrong thing" — it means we run on last-known-good.
+- Config is data, never code. No expressions, no callbacks, no `eval`. A schema check rejects
+  anything else — this is also what keeps us on the right side of the remote-hosted-code rule.
+
+This narrows ADR-002's "nothing leaves the machine": nothing *about the user* leaves. A static
+config download carries no information about them. If that ever stops being true — a version
+parameter, an install ID, anything — it needs a new ADR.
+
+**Consequence:** because the extension hides nothing without a model, a broken selector and a
+missing model look identical to the user. Instrument the difference: ship a stale-selector sentinel
+that detects "feed root found, zero posts matched" and surfaces it distinctly.
