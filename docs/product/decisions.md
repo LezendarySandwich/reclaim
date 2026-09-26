@@ -575,9 +575,13 @@ exact shape ADR-005 exists to prevent.
 **The one real false-positive risk, and how it is handled.** "Promoted" is also what people say
 when they get a new job. A substring match would hide *"I was promoted to Senior Engineer"* —
 among the commonest posts on LinkedIn, and about the worst mistake this extension could make. So
-the label must be a **line of its own** within the first eight lines of the post, matching a known
-label exactly. Real ads render it standalone in the actor block; promotion announcements never do.
-Three tests pin this.
+the label must be **an element whose entire text is the label**, matching a known label exactly.
+Real ads render `<p><span>Promoted</span></p>` in the actor block; "I was promoted to Senior
+Engineer" is never an element's whole content. Three tests pin this.
+
+A line-based version of the same idea was tried and is wrong: `textContent` concatenates text
+nodes with no separator, so a real Datadog ad reads as the single line
+`"Datadog 587,644 followersPromoted"` and matches nothing. Element scanning is what shipped.
 
 **Terms-of-service exposure is higher here than anywhere else in the product, and this is a
 considered acceptance rather than an oversight.** LinkedIn's User Agreement §8.2 names
@@ -592,3 +596,52 @@ already states that LinkedIn's terms prohibit appearance-modifying extensions.
 
 **If this is ever distributed**, revisit: default it off, make enabling it an explicit choice, and
 say plainly in the listing that it filters adverts.
+
+---
+
+## ADR-027 — A resolved post is reopened when the evidence it was resolved on changes
+
+**Status:** accepted · 2026-09-26
+**Supersedes:** nothing. Amends the watcher state machine described in `docs/features/006-linkedin-adapter/`.
+
+`done` used to be terminal. A post the router cleared was never looked at again, on the reasoning
+that re-routing every post on every mutation would burn the main thread for nothing.
+
+That reasoning was right about the cost and wrong about the premise. It assumed a post is fully
+rendered the first time we see it. LinkedIn's SDUI feed hydrates a card in pieces and does not
+guarantee the order: a captured ad painted its body text before the actor block carrying the
+"Promoted" label. In that window the post is a recognisable post — it has an author link and a
+text box, so the adapter finds it and the router clears it as ordinary marketing prose — and then
+the label lands a frame later and nothing is listening.
+
+This is why *some* ads were getting through while others were caught. It presented as a flaky
+selector and was actually a race, which is the main reason it survived two rounds of fixes aimed
+at the selectors.
+
+**The decision.** `done` records a fingerprint of the evidence it was resolved on
+(`isPromoted` plus text length). On a later scan, a post whose fingerprint has moved is reopened
+and re-routed.
+
+Three properties make this safe rather than a source of churn:
+
+- **Re-extraction is already paid for.** `#scan` calls `adapter.extract()` on every post on every
+  scan and discarded the result at the state check. The comparison is a string equality on data
+  we already had.
+- **It is asymmetric.** Only evidence that could *increase* suspicion reopens a post: gaining the
+  "Promoted" label, or gaining text. Shrinking text — a partial re-render, or the user collapsing
+  "see more" — does not. Otherwise a re-render could relitigate a post the user has already been
+  shown, which is a worse failure than the one being fixed.
+- **It is capped.** Three reopens per post. `isPromoted` flips false→true at most once and text
+  growth is near-monotonic, so reaching the cap means the page is mutating pathologically, and the
+  right answer there is to stop rather than to keep paying.
+
+**What this does not do.** It does not re-examine a post that was *classified* — only one the
+router resolved without a model. A model verdict is not revisited on a re-render.
+
+**Rejected: polling until the card looks settled.** No signal exists for "hydration finished", so
+this amounts to a timer, and any timer is either too short (same race) or a per-post delay on
+every post to fix a minority.
+
+**Rejected: treating any mutation as a reopen.** Correct and far too expensive — LinkedIn mutates
+the feed continuously, and most mutations are cosmetic. A test pins that a class-attribute change
+reopens nothing.

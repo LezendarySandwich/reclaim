@@ -247,3 +247,42 @@ on a surface whose whole purpose is to say "this person posts a lot of slop".
       is more honest than relying on selector precedence anyway.
       `queryAll`/`queryFirst` keep first-wins, which is correct for a FIELD — there you do want
       the best available selector for one value.
+
+## A promoted post still not hiding — a race, not a selector — 2026-09-26
+
+Reported with the full captured DOM of a Redpanda ad. The adapter turned out to be innocent:
+run against that exact markup it returns `isPromoted: true`, author `Redpanda Data`, correct
+body text. Three earlier fixes had aimed at the selectors because the symptom looked like one.
+
+- [x] **`done` was terminal, and it was being set mid-hydration.** LinkedIn's SDUI feed paints a
+      card in pieces and the body text can land before the actor block carrying "Promoted". In
+      that window the card is already a recognisable post, so the router clears it — permanently.
+      The label arriving a frame later was never seen. This is why *some* ads hid and others did
+      not, and why it resisted selector fixes. `done` now carries a fingerprint of the evidence
+      it was resolved on and reopens when that changes (ADR-027).
+- [x] Reopening is asymmetric: gaining the label or gaining text reopens, losing either does not.
+      A re-render must not be able to relitigate a post the user has already been shown.
+- [x] Reopening is capped at three per post, so a pathologically mutating page cannot spin.
+- [x] Re-extraction is free — `#scan` already called `extract()` on every post on every scan and
+      threw the result away at the state check.
+- [x] Captured the ad verbatim as `followedPageAdHtml`. New shape: a *person's* "follows this
+      page" banner wrapping a *company's* promoted post, so the first `/in/` link belongs to
+      someone who did not write it. Author attribution resolves to the company; a test pins it.
+- [x] **Ads carry `FeedType_MAIN_FEED_RELEVANCE`, the same FeedType as organic posts.** This
+      closes the open question from the previous round and kills the idea of routing on FeedType.
+- [x] Corrected ADR-026, which described the line-split promoted check as shipped. It was tried
+      and disproven; element scanning is what ships. The code comment was right, the ADR was not.
+
+### Found while here
+
+- [x] **The watcher suite was ~5% flaky per test, by construction.** Audit sampling defaults to
+      5% against real `Math.random()`, and no test pinned it, so every "a clean post is not sent
+      to the model" assertion failed one run in twenty. Caught when an unrelated stashed run
+      failed a test I had not touched. All constructions now set `auditRate` explicitly.
+- [ ] The reopen path is unit-tested but has never run against the live feed. The thing to watch
+      for is an ad that hides only after a visible delay — that would mean the label lands after
+      the post is already on screen, and the stub appears under the reader's eye rather than
+      before it.
+- [ ] `#resolvedOn` and `#reopens` grow with the number of posts seen in a session and are never
+      pruned. Two small strings per post, so it is unlikely to matter in a session-length feed,
+      but it is unbounded and nothing measures it.
