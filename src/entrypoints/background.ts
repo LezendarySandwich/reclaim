@@ -48,8 +48,22 @@ const scheduler = new InferenceScheduler<Partial<Record<Axis, number>>>()
 
 let engineState: EngineState = { status: 'uninitialized' }
 
-/** Bring the engine up, mapping every failure onto the fail-open state machine (ADR-005). */
-async function loadEngine(): Promise<void> {
+function toDegraded(e: unknown): EngineState {
+  return {
+    status: 'degraded',
+    reason: 'engine_error',
+    detail: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+  }
+}
+
+/**
+ * PASSIVE probe. Reports what this device can do; never downloads anything.
+ *
+ * Called on every worker wake. Stops at `needs_setup` when the model is merely downloadable —
+ * the worker *could* start a 4.27 GB fetch with no user gesture (ADR-018), which is exactly why
+ * it must not do so on its own.
+ */
+async function probeEngine(): Promise<void> {
   if (engineState.status === 'ready' || engineState.status === 'downloading') return
 
   engineState = { status: 'checking' }
@@ -63,24 +77,40 @@ async function loadEngine(): Promise<void> {
       engineState = { status: 'degraded', reason: 'unsupported_hardware_or_policy' }
       return
     }
-    if (availability === 'downloadable') {
-      // Stop here deliberately. The worker could start a multi-gigabyte download with no user
-      // gesture, and that is exactly why it must not — see ADR-018.
+    if (availability === 'downloadable' || availability === 'downloading') {
       engineState = { status: 'needs_setup' }
       return
     }
 
-    engineState = { status: 'downloading', fraction: 0 }
+    // Already present. Building the session is fast and involves no download.
+    await engine.load()
+    engineState = { status: 'ready', engineId: engine.id }
+  } catch (e) {
+    engineState = toDegraded(e)
+  }
+}
+
+/**
+ * ACTIVE install. This is the one that actually downloads.
+ *
+ * Separate from `probeEngine` because conflating them was a real bug: the install button called
+ * the probe, which saw `downloadable`, set `needs_setup` and returned without ever starting the
+ * download. The UI then showed one render and no progress, because nothing was happening.
+ *
+ * Deliberately NOT awaited by its caller — a 4.27 GB download inside a message handler would
+ * leave the response pending for minutes. The dashboard polls `GET_ENGINE_STATE` for progress.
+ */
+async function installEngine(): Promise<void> {
+  if (engineState.status === 'ready' || engineState.status === 'downloading') return
+
+  engineState = { status: 'downloading', fraction: 0 }
+  try {
     await engine.load((p) => {
       engineState = { status: 'downloading', fraction: p.fraction }
     })
     engineState = { status: 'ready', engineId: engine.id }
   } catch (e) {
-    engineState = {
-      status: 'degraded',
-      reason: 'engine_error',
-      detail: e instanceof Error ? e.message : String(e),
-    }
+    engineState = toDegraded(e)
   }
 }
 
@@ -134,10 +164,8 @@ export default defineBackground(() => {
   browser.permissions.onRemoved.addListener(() => void reconcileContentScript())
   void reconcileContentScript()
 
-  // Probe the engine on wake. Never starts a download on its own — `loadEngine` stops at
-  // `needs_setup` when the model is merely downloadable, so the multi-gigabyte fetch stays
-  // behind an explicit click on an extension page.
-  void loadEngine()
+  // Passive probe on wake. Never downloads — that is `installEngine`, behind an explicit click.
+  void probeEngine()
 
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!isRequestFor(msg, 'background')) return false
@@ -184,14 +212,13 @@ export default defineBackground(() => {
             break
           }
           case 'INSTALL_MODEL': {
-            // Reachable only from an extension page, because `create()` needs a transient user
-            // gesture when the model is not yet present. The service worker is technically
-            // exempt (no Window), but a multi-gigabyte download deserves an explicit click —
-            // see ADR-018.
-            await loadEngine()
-            response = engineState.status === 'ready'
-              ? { ok: true, type: 'INSTALL_MODEL' }
-              : errorResponse(new Error(`Engine is ${engineState.status}`))
+            // Fire and forget, and note it calls installEngine rather than probeEngine. The
+            // first version awaited the PROBE here, which sees `downloadable` and returns
+            // without downloading — so the button did nothing at all. Awaiting the real download
+            // would be no better: the response would not arrive for minutes. Kick it off and
+            // return; the dashboard polls GET_ENGINE_STATE for progress.
+            void installEngine()
+            response = { ok: true, type: 'INSTALL_MODEL' }
             break
           }
         }
