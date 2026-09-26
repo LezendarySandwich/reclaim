@@ -60,7 +60,17 @@ offscreen document, and a content script. `python3 report.py` re-prints results 
 
 ---
 
-## 3. Two small things, whenever
+## 3. A screen-reader pass on the collapsed stub, eventually
+
+Not urgent, but it needs a human and I want it on your radar. The stub's accessibility is
+argued from first principles and asserted in tests, but happy-dom does no layout — every element
+reports a 0×0 rect — so none of those assertions prove anything *visually*. It needs a real
+VoiceOver/NVDA pass and a Windows high-contrast check before launch. Details in
+`docs/features/009-collapsed-stub/checklist.md`.
+
+---
+
+## 4. Two small things, whenever
 
 - **`brew install pnpm`.** Every command currently goes through `npx --yes pnpm@12` because
   `corepack enable` can't write to `/opt/homebrew`. npm genuinely cannot install this project
@@ -112,7 +122,7 @@ behaviour, not a bug.
 
 ## Where the code actually is
 
-**16 commits. 209 tests passing, typecheck clean, builds for Chrome and Firefox.**
+**22 commits. 289 tests passing, typecheck clean, builds for Chrome and Firefox.**
 
 | Layer | State |
 |---|---|
@@ -122,8 +132,10 @@ behaviour, not a bug.
 | `src/storage/` — IndexedDB, aggregates, settings | Done |
 | `tests/invariants.test.ts` | Codebase-wide guards for the four non-negotiables |
 | `src/adapters/` — seam, selectors, identity | Foundations done. `adapter.ts` itself **blocked on S4** |
-| `src/engines/` | **Empty — blocked on S2** |
-| Dashboard / popup UI | Placeholders |
+| `src/engines/` — Prompt API engine, prompt, registry | Done. Runs in the service worker (ADR-018). WebLLM deferred |
+| `src/core/` — scheduler + classify pipeline | Done. `CLASSIFY_BATCH` returns real verdicts |
+| `src/ui/stub.ts` — collapsed stub | Done, pending a real screen-reader pass |
+| Dashboard / popup / onboarding UI | Placeholders — **this is now the main gap** |
 | Consent gate (ADR-020) | Done — gate, manifest, runtime registration. No onboarding UI yet, so nothing can *grant* consent |
 
 Run `pnpm verify` (build → build:firefox → typecheck → test) to see it all green.
@@ -147,11 +159,12 @@ In order:
 1. ~~Consent gate~~ — done.
 2. ~~`SiteAdapter` seam and LinkedIn foundations~~ — done. Selector profiles for both live
    feeds, and identity derivation (URN → permalink → composite). `adapter.ts` waits on S4.
-3. `ModelEngine` interface and a Gemini Nano engine, behind the message boundary, so relocating
-   the host stays a one-file change if S2 surprises us.
-4. The collapsed stub, in a shadow root, with the infinite-scroll fix prior art says we'll need on
-   day one.
-5. Dashboard.
+3. ~~`ModelEngine` and a Gemini Nano engine~~ — done, plus the scheduler and the classify
+   pipeline, so the service worker now produces real verdicts.
+4. ~~The collapsed stub~~ — done, in a shadow root, with the accessibility choices argued in
+   `docs/features/009-collapsed-stub/plan.md`.
+5. **Onboarding + dashboard UI.** This is the biggest remaining unblocked piece: the consent gate
+   works but nothing can *grant* consent, so the extension is inert by construction.
 
 ---
 
