@@ -7,6 +7,7 @@ if you have not.
 
 | Path | What it holds | Read it when |
 |---|---|---|
+| `NEEDS-YOU.md` | Open asks for the human, and current build state | **Start here if you have been away** |
 | `product/vision.md` | What we are building and why, plus the phase roadmap | Orienting for the first time |
 | `product/decisions.md` | Append-only ADR log. Every settled decision and its reasoning | Before proposing a change to how something works |
 | `architecture/overview.md` | The system: execution contexts, seams, data flow | Before writing code anywhere |

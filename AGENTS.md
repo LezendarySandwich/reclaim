@@ -11,6 +11,9 @@ ever leaves your machine.
 
 Start with `docs/README.md`. Do not start by reading `src/`.
 
+If work is blocked on something only a human can do, record it in `docs/NEEDS-YOU.md` — that is
+the one file the user is asked to read on returning, so an ask that is not in there is invisible.
+
 ## The three rules
 
 ### 1. Every feature gets a tracking folder, created before the code
