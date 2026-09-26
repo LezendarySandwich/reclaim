@@ -66,12 +66,20 @@ export interface SiteAdapter {
   /**
    * Replace the post's content with a collapsed stub.
    *
+   * Takes `authorName` rather than re-deriving it. An earlier version re-read the author from the
+   * DOM here, which was both redundant — `extract()` had already found it — and fragile: when the
+   * re-read came up empty the stub rendered "this author" for a post whose author we knew
+   * perfectly well. Whatever `extract()` produced is the single source of truth.
+   *
    * Must NOT `display: none` the row. LinkedIn's infinite scroll is driven by an
    * IntersectionObserver sentinel, and removing rows from the flow starves it — the feed simply
    * stops loading. Two independent prior-art projects documented hitting this. Collapse height or
    * replace inner content instead.
    */
-  mountStub(el: Element, label: string, onExpand: () => void): void
+  mountStub(
+    el: Element,
+    options: { label: string; authorName: string; onExpand: () => void },
+  ): void
 
   /** Restore a collapsed post. Must be safe to call on a post that was never collapsed. */
   unmountStub(el: Element): void

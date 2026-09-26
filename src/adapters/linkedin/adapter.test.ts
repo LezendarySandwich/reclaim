@@ -197,7 +197,11 @@ describe('stub mounting', () => {
     modernFeed([modernPost({ author: 'Alice Smith' })])
     adapter.detectProfile(document)
     const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]! as HTMLElement
-    adapter.mountStub(el, 'Looks like engagement bait', () => {})
+    adapter.mountStub(el, {
+      label: 'Looks like engagement bait',
+      authorName: 'Alice Smith',
+      onExpand: () => {},
+    })
     const stub = el.querySelector('[data-reclaim-stub]')!
     expect(stub.shadowRoot!.textContent).toContain('Alice Smith')
   })
@@ -206,7 +210,7 @@ describe('stub mounting', () => {
     modernFeed([modernPost()])
     adapter.detectProfile(document)
     const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]! as HTMLElement
-    adapter.mountStub(el, 'Looks templated', vi.fn())
+    adapter.mountStub(el, { label: 'Looks templated', authorName: 'Alice', onExpand: vi.fn() })
     adapter.unmountStub(el)
     expect(el.querySelector('[data-reclaim-stub]')).toBeNull()
   })
@@ -236,5 +240,43 @@ describe('LinkedIn’s own aria-hidden see-more button', () => {
     const button = el.querySelector('[data-testid="expandable-text-button"]')
     expect(button).not.toBeNull()
     expect(button!.getAttribute('aria-hidden')).toBe('true')
+  })
+})
+
+describe('author name — the "this author" bug', () => {
+  // Reported from a live feed: two posts collapsed with the stub reading "this author — Looks
+  // like engagement bait". mountStub was re-reading the author from the DOM instead of using
+  // what extract() had already found, and the re-read came back empty.
+  it('uses the name it is given rather than re-deriving one', () => {
+    modernFeed([modernPost({ author: 'Alice Smith' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]! as HTMLElement
+    adapter.mountStub(el, { label: 'Looks templated', authorName: 'Bob Jones', onExpand: () => {} })
+    const stub = el.querySelector('[data-reclaim-stub]')!
+    expect(stub.shadowRoot!.textContent).toContain('Bob Jones')
+  })
+
+  it('falls back to "this author" only when genuinely given nothing', () => {
+    modernFeed([modernPost()])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]! as HTMLElement
+    adapter.mountStub(el, { label: 'Looks templated', authorName: '', onExpand: () => {} })
+    expect(el.querySelector('[data-reclaim-stub]')!.shadowRoot!.textContent).toContain('this author')
+  })
+
+  it('derives a readable name from the profile slug when the name node is missing', () => {
+    // LinkedIn's name markup varies by post type and locale. A stub saying "this author" when
+    // the href plainly reads /in/alice-smith is worse than an imperfect guess.
+    modernFeed([modernPost({ author: '', href: '/in/alice-smith-4a2b9f1c/' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.authorName).toBe('Alice Smith')
+  })
+
+  it('prefers the rendered name over the slug', () => {
+    modernFeed([modernPost({ author: 'Alice Smith-Jones', href: '/in/asj123/' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.authorName).toBe('Alice Smith-Jones')
   })
 })

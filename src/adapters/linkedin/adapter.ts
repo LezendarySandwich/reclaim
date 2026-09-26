@@ -91,10 +91,26 @@ function readAuthor(postEl: Element, profile: SelectorProfile): { name: string; 
     ? href.split('?')[0]!.replace(/\/+$/u, '')
     : ''
 
+  const fromNode = (nameEl?.textContent ?? '').trim() || (link?.textContent ?? '').trim()
+
   return {
-    name: (nameEl?.textContent ?? '').trim() || (link?.textContent ?? '').trim(),
+    // Last resort: derive a readable name from the profile slug. LinkedIn's name markup varies
+    // (company posts, promoted posts, some locales), and a stub reading "this author" when the
+    // href plainly says /in/alice-smith is worse than an imperfect guess.
+    name: fromNode || slugToName(urn),
     urn: urn || 'unknown',
   }
+}
+
+/** `/in/alice-smith-1a2b3c` -> `Alice Smith`. Trailing id-ish segments are dropped. */
+function slugToName(urn: string): string {
+  const slug = urn.split('/').filter(Boolean).pop()
+  if (!slug) return ''
+  return slug
+    .split('-')
+    .filter((part) => part.length > 0 && !/^[0-9a-f]{4,}$/iu.test(part))
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 function readMedia(postEl: Element, profile: SelectorProfile): MediaRef[] {
@@ -202,10 +218,16 @@ export class LinkedInAdapter implements SiteAdapter {
     )
   }
 
-  mountStub(el: Element, label: string, onExpand: () => void): void {
+  mountStub(
+    el: Element,
+    options: { label: string; authorName: string; onExpand: () => void },
+  ): void {
     if (!(el instanceof HTMLElement)) return
-    const { name } = readAuthor(el, this.#profile ?? BUNDLED_SELECTORS.profiles[0]!)
-    mountStub(el, { label, authorName: name || 'this author', onExpand })
+    mountStub(el, {
+      label: options.label,
+      authorName: options.authorName || 'this author',
+      onExpand: options.onExpand,
+    })
   }
 
   unmountStub(el: Element): void {

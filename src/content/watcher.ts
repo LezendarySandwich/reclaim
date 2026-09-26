@@ -51,6 +51,13 @@ export class FeedWatcher {
   readonly #state = new Map<string, PostState>()
   /** Live element for a post id, refreshed on every scan so a recycled node cannot go stale. */
   readonly #elements = new Map<string, Element>()
+  /**
+   * Author name per post id, captured at extraction time.
+   *
+   * Kept because the stub needs it and re-deriving it at collapse time was unreliable — the stub
+   * rendered "this author" for posts whose author extraction had already identified.
+   */
+  readonly #authors = new Map<string, string>()
 
   #mutationObserver: MutationObserver | null = null
   #intersectionObserver: IntersectionObserver | null = null
@@ -121,6 +128,7 @@ export class FeedWatcher {
       // Always refresh the element mapping. If LinkedIn recycles nodes, the id -> element
       // association changes underneath us and a stale reference would stub the wrong post.
       this.#elements.set(post.id, el)
+      if (post.authorName) this.#authors.set(post.id, post.authorName)
 
       // Lazily-mounted rows exist before their content does. Leave them alone; the next
       // mutation brings us back.
@@ -211,9 +219,13 @@ export class FeedWatcher {
 
     const label = verdict.triggeredBy.length > 0 ? LABELS[verdict.triggeredBy[0]!] : 'Hidden'
 
-    this.#deps.adapter.mountStub(el, label, () => {
-      // Expanding is itself feedback: the user wanted to read it.
-      this.#deps.onFeedback?.(verdict.postId, verdict.triggeredBy[0] ?? 'engagement_bait', false)
+    this.#deps.adapter.mountStub(el, {
+      label,
+      authorName: this.#authors.get(verdict.postId) ?? '',
+      onExpand: () => {
+        // Expanding is itself feedback: the user wanted to read it.
+        this.#deps.onFeedback?.(verdict.postId, verdict.triggeredBy[0] ?? 'engagement_bait', false)
+      },
     })
   }
 
