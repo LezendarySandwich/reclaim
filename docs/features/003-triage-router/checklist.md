@@ -54,3 +54,15 @@ _Append here. Strike through with a reason rather than deleting._
       languages without capitalisation (CJK scores 0 concreteness, so all CJK posts look maximally
       abstract). LinkedIn is heavily non-English — this needs a script-aware guard.
 - [ ] Hedging/antithesis/tricolon word lists are English-only. Same problem, wider.
+
+- [x] **Emoji handling was badly under-built** (raised by the user, and they were right).
+      `emojiBulletRate` only inspected `line.slice(0, 3)`, so it missed leading whitespace, could
+      slice a surrogate pair in half, and measured nothing about the rest of the post. Added:
+      - `emojiDensity` — emoji per 100 words anywhere in the post
+      - `slopEmojiRate` — density of a hand-picked 30-emoji set (🚀 💡 ✅ 👉 🔥 …), the vocabulary
+        generated LinkedIn listicles actually use
+      - `emojiBulletRate` rewritten to anchor at line start allowing indentation
+      Kept density and the slop set SEPARATE on purpose: emoji use is cultural and generational,
+      so penalising it broadly would be another demographic proxy. What discriminates is *which*
+      emoji, not *whether*. Measured: an emoji listicle scores 0.310 and a 👉-bulleted post 0.325,
+      while a human post containing 😅 stays at 0.052 and routes `clean`.

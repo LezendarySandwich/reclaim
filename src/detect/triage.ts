@@ -50,7 +50,9 @@ const BAIT_WEIGHTS: Partial<Record<keyof Features, number>> = {
   timeContrast: 0.3,
   humbleOpener: 0.3,
   oneLineParaRatio: 0.25,
-  emojiBulletRate: 0.2,
+  emojiBulletRate: 0.25,
+  slopEmojiRate: 0.3,
+  emojiDensity: 0.15,
   allCapsHookRate: 0.2,
 }
 
@@ -66,12 +68,19 @@ const BAIT_WEIGHTS: Partial<Record<keyof Features, number>> = {
 const AI_WEIGHTS: Partial<Record<keyof Features, number>> = {
   abstractness: 0.3,
   sentenceUniformity: 0.22,
-  paragraphUniformity: 0.15,
   antithesisRate: 0.22,
+  // The 🚀/💡/✅/👉 vocabulary carries real weight on this side. Unlike the lexical tells, it is
+  // not a proxy for formal or non-native writing — it is a proxy for a generated listicle, and
+  // it is what makes an emoji-bulleted post distinguishable from a careful human one. Raw emoji
+  // density is weighted much lower, because using emoji is not evidence of anything.
+  slopEmojiRate: 0.25,
+  emojiBulletRate: 0.18,
+  paragraphUniformity: 0.15,
   tricolonRate: 0.15,
+  hedgingRate: 0.12,
+  emojiDensity: 0.1,
   emDashRate: 0.1,
   curlyPunctRate: 0.08,
-  hedgingRate: 0.12,
 }
 
 /** Concrete, specific writing is the strongest counter-signal we have. */

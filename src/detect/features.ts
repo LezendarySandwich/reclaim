@@ -23,6 +23,14 @@ export interface Features {
   curlyPunctRate: number
   /** High: lines that open with an emoji bullet. The "🚀 Point one" listicle shape. */
   emojiBulletRate: number
+  /** High: emoji-dense throughout, not just at line starts. */
+  emojiDensity: number
+  /**
+   * High: uses the specific small set of emoji that LLM-written LinkedIn posts reach for
+   * constantly — 🚀 💡 ✅ 👉 🔥 and friends. Much narrower and higher-precision than raw density:
+   * plenty of people use emoji, far fewer bullet a listicle with 👉.
+   */
+  slopEmojiRate: number
   /** High: ALL-CAPS opener words used as a hook. */
   allCapsHookRate: number
 
@@ -70,6 +78,8 @@ export const EMPTY_FEATURES: Features = {
   emDashRate: 0,
   curlyPunctRate: 0,
   emojiBulletRate: 0,
+  emojiDensity: 0,
+  slopEmojiRate: 0,
   allCapsHookRate: 0,
   sentenceUniformity: 0,
   paragraphUniformity: 0,
@@ -88,8 +98,33 @@ export const EMPTY_FEATURES: Features = {
 const HEDGES =
   /\b(?:arguably|perhaps|somewhat|relatively|fairly|quite|rather|generally|typically|often|essentially|fundamentally|ultimately|truly|simply|merely|virtually|largely|broadly)\b/giu
 
-const EMOJI =
-  /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/u
+const EMOJI_CLASS =
+  String.raw`[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{1F900}-\u{1F9FF}]`
+const EMOJI = new RegExp(EMOJI_CLASS, 'u')
+const EMOJI_GLOBAL = new RegExp(`${EMOJI_CLASS}\u{FE0F}?`, 'gu')
+
+/**
+ * A line that OPENS with an emoji, allowing leading whitespace and a variation selector.
+ *
+ * The earlier version tested `line.slice(0, 3)`, which could slice a surrogate pair in half and
+ * missed any line with leading indentation.
+ */
+const EMOJI_BULLET_LINE = new RegExp(String.raw`^\s*${EMOJI_CLASS}`, 'u')
+
+/**
+ * The emoji LLM-written LinkedIn posts reach for, over and over.
+ *
+ * Deliberately a small hand-picked set rather than "emoji in general". Emoji use is cultural and
+ * generational — penalising it broadly would be another proxy for a demographic, which is exactly
+ * the mistake ADR-004 exists to avoid. What is distinctive is not *that* a post uses emoji but
+ * *which*: the 🚀/💡/✅/👉 rocket-lightbulb-tick-pointer vocabulary of a generated listicle. 👉 and
+ * 👇 as bullet glyphs are the strongest tells in the set.
+ */
+const SLOP_EMOJI = new Set([
+  '🚀', '💡', '✅', '👉', '👇', '🔥', '✨', '🎯', '💪', '🙌',
+  '🤝', '📈', '💯', '⚡', '🌟', '🧠', '📊', '🔑', '⭐', '➡',
+  '✔', '🎉', '💰', '🏆', '📌', '🔗', '💥', '🙏', '👏', '🌱',
+])
 
 /**
  * Antithesis: "not just X but Y", "It's not X. It's Y.", "X is not about Y. It is about Z.",
@@ -179,7 +214,13 @@ export function extractFeatures(text: string): Features {
   const emDashes = (text.match(/—/gu) ?? []).length
   const curly = (text.match(/[“”‘’]/gu) ?? []).length
 
-  const emojiBulletLines = nonEmptyLines.filter((l) => EMOJI.test(l.slice(0, 3))).length
+  const emojiBulletLines = nonEmptyLines.filter((l) => EMOJI_BULLET_LINE.test(l)).length
+
+  EMOJI_GLOBAL.lastIndex = 0
+  const allEmoji = text.match(EMOJI_GLOBAL) ?? []
+  // Strip variation selectors before set lookup: "➡️" is U+27A1 U+FE0F, and the set holds bare
+  // code points so both the plain and the emoji-presentation form match.
+  const slopEmoji = allEmoji.filter((e) => SLOP_EMOJI.has(e.replace(/\uFE0F/gu, '')))
   const allCapsHooks = nonEmptyLines.filter((l) =>
     /^[A-Z][A-Z\s!:.]{3,}[:!]/u.test(l.slice(0, 40)),
   ).length
@@ -197,6 +238,8 @@ export function extractFeatures(text: string): Features {
     emDashRate: ramp(per100(emDashes), 2),
     curlyPunctRate: ramp(per100(curly), 4),
     emojiBulletRate: nonEmptyLines.length ? emojiBulletLines / nonEmptyLines.length : 0,
+    emojiDensity: ramp(per100(allEmoji.length), 8),
+    slopEmojiRate: ramp(per100(slopEmoji.length), 4),
     allCapsHookRate: nonEmptyLines.length ? allCapsHooks / nonEmptyLines.length : 0,
 
     sentenceUniformity: uniformity(sentences.map((s) => s.split(/\s+/u).length)),

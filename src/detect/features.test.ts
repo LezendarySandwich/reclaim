@@ -133,3 +133,53 @@ describe('robustness', () => {
     }
   })
 })
+
+describe('emoji — the LinkedIn slop vocabulary', () => {
+  it('detects the rocket-lightbulb-tick listicle shape', () => {
+    const f = extractFeatures('🚀 Ship fast\n💡 Learn faster\n✅ Repeat\n🔥 Win')
+    expect(f.slopEmojiRate).toBeGreaterThan(0.9)
+    expect(f.emojiBulletRate).toBeGreaterThan(0.9)
+  })
+
+  it('detects 👉 used as a bullet glyph', () => {
+    const f = extractFeatures('Three lessons:\n👉 One thing\n👉 Another thing\n👉 A third thing')
+    expect(f.slopEmojiRate).toBeGreaterThan(0.5)
+    expect(f.emojiBulletRate).toBeGreaterThan(0.5)
+  })
+
+  it('counts slop emoji anywhere, not only at line starts', () => {
+    const f = extractFeatures(
+      'We shipped it 🚀 and the team was thrilled 🔥 and the metrics went up 📈 massively 💯',
+    )
+    expect(f.slopEmojiRate).toBeGreaterThan(0)
+    expect(f.emojiBulletRate).toBe(0)
+  })
+
+  it('separates raw density from the slop vocabulary', () => {
+    // Plenty of people use emoji. Using THESE emoji is the signal, not emoji as such.
+    const ordinary = extractFeatures('Had a great weekend with the family 😊🐕🌳 lovely weather ☀️')
+    expect(ordinary.emojiDensity).toBeGreaterThan(0)
+    expect(ordinary.slopEmojiRate).toBe(0)
+  })
+
+  it('matches both the bare and variation-selector forms of an emoji', () => {
+    expect(extractFeatures('➡️ one\n➡️ two\n➡️ three').slopEmojiRate).toBeGreaterThan(0)
+    expect(extractFeatures('➡ one\n➡ two\n➡ three').slopEmojiRate).toBeGreaterThan(0)
+  })
+
+  it('handles a leading-whitespace emoji bullet, which the slice(0,3) version missed', () => {
+    expect(extractFeatures('  🚀 One\n  💡 Two\n  ✅ Three').emojiBulletRate).toBeGreaterThan(0.9)
+  })
+
+  it('does not slice a surrogate pair in half', () => {
+    expect(() => extractFeatures('🚀')).not.toThrow()
+    expect(extractFeatures('🚀 a\n🚀 b\n🚀 c').emojiBulletRate).toBeGreaterThan(0.9)
+  })
+
+  it('scores a plain text post at zero on all three', () => {
+    const f = extractFeatures('We fixed the reconciliation bug on Tuesday. It took four hours.')
+    expect(f.emojiDensity).toBe(0)
+    expect(f.slopEmojiRate).toBe(0)
+    expect(f.emojiBulletRate).toBe(0)
+  })
+})
