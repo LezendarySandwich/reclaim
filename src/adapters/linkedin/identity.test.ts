@@ -118,9 +118,10 @@ describe('componentkey identity — the modern feed’s only per-post id (S4)', 
   })
 
   it('handles the recent-feed variant too', () => {
-    expect(extractComponentKeyId('expandedABCDEFGHIJKLMNOPQRFeedType_MAIN_FEED_RECENT')).toBe(
-      'ck:ABCDEFGHIJKLMNOPQR',
-    )
+    // Real ids are exactly 43 base64url chars. An earlier version of this test invented an
+    // 18-char one, which passed against a looser regex and would never occur in the wild.
+    const id = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AbCdE'
+    expect(extractComponentKeyId(`expanded${id}FeedType_MAIN_FEED_RECENT`)).toBe(`ck:${id}`)
   })
 
   it('REJECTS shared template keys — the collision trap prior art fell into', () => {
@@ -131,8 +132,19 @@ describe('componentkey identity — the modern feed’s only per-post id (S4)', 
     }
   })
 
-  it('rejects a key with too short an id to be real', () => {
+  it('rejects a key with no 43-char run before FeedType_', () => {
     expect(extractComponentKeyId('expandedXFeedType_MAIN_FEED')).toBeNull()
+  })
+
+  it('documented limitation: a SHORTER id absorbs prefix characters', () => {
+    // The regex takes the 43 characters immediately before `FeedType_`, and prefixes like
+    // `expanded` are themselves base64url-legal. So if LinkedIn ever shortens the id, this
+    // silently eats prefix chars — and because prefixes VARY per element within one post, the
+    // one-id-per-post property would break. Asserting the behaviour so the day it matters, this
+    // test fails loudly rather than the leaderboard quietly double-counting.
+    const short = 'a'.repeat(42)
+    const got = extractComponentKeyId(`expanded${short}FeedType_MAIN_FEED`)
+    expect(got).toBe(`ck:d${short}`) // the 'd' is the tail of "expanded"
   })
 
   it.each([null, undefined, '', 'nonsense'])('returns null for %s', (v) => {
@@ -172,5 +184,40 @@ describe('componentkey identity — the modern feed’s only per-post id (S4)', 
   it('counts as durable, unlike a composite hash', () => {
     expect(isDurable('componentkey')).toBe(true)
     expect(isDurable('composite')).toBe(false)
+  })
+})
+
+describe('componentkey is prefix-agnostic (S4 run 2)', () => {
+  // A single post carries these three elements. An earlier regex anchored on `^expanded` and so
+  // gave the same post different identities depending on which element it saw.
+  const SAME_POST = [
+    'expanded2MdnVkMoPnH_c9l5ga0mViyAynFjul67OWI9oSM-3OsFeedType_MAIN_FEED_RELEVANCE',
+    'update-card-focus2MdnVkMoPnH_c9l5ga0mViyAynFjul67OWI9oSM-3OsFeedType_MAIN_FEED_RELEVANCE',
+    'CgsIgIDXtN7e+LTQAQ-replaceableCommentTools2MdnVkMoPnH_c9l5ga0mViyAynFjul67OWI9oSM-3OsFeedType_MAIN_FEED_RELEVANCE',
+  ]
+
+  it('yields ONE id across every prefix on the same post', () => {
+    const ids = new Set(SAME_POST.map(extractComponentKeyId))
+    expect(ids.size).toBe(1)
+    expect([...ids][0]).toBe('ck:2MdnVkMoPnH_c9l5ga0mViyAynFjul67OWI9oSM-3Os')
+  })
+
+  it.each([
+    'expanded7cdbt_jwDmDtd5s0G2glmqfjUhVmI_JvbKvFl2n10wQFeedType_MAIN_FEED_RELEVANCE',
+    'expandedKpGBMLBmD8ZkqBHdCJWIZqL4jR5NuT2tqrQQf51jTvQFeedType_MAIN_FEED_RELEVANCE',
+  ])('extracts a 43-char id from other captured posts', (key) => {
+    const id = extractComponentKeyId(key)
+    expect(id).not.toBeNull()
+    expect(id!.slice(3)).toHaveLength(43)
+  })
+
+  it('still rejects shared template keys', () => {
+    for (const key of ['body-key', 'author-name-key', 'social-proof-bar-key']) {
+      expect(extractComponentKeyId(key)).toBeNull()
+    }
+  })
+
+  it('rejects a FeedType_ key with no id-shaped run before it', () => {
+    expect(extractComponentKeyId('shortFeedType_MAIN_FEED')).toBeNull()
   })
 })

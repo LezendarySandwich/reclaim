@@ -1,0 +1,39 @@
+{
+  "run": 2,
+  "date": "2026-09-26",
+  "variant": "modern (body[data-rehydrated], [data-testid=mainFeed])",
+  "postCount": 3,
+  "bestPostSelector": "div[componentkey*=\"FeedType_MAIN_FEED\"]",
+  "identity": {
+    "withUrnFromAttribute": 0,
+    "withUrnOnlyFromUpdateHref": 0,
+    "withNoStableUrn": 3,
+    "componentkeySample": "expandedKpGBMLBmD8ZkqBHdCJWIZqL4jR5NuT2tqrQQf51jTvQFeedType_MAIN_FEED_RELEVANCE"
+  },
+  "fields": {
+    "bodyText": "100%",
+    "controlMenu": "100%",
+    "authorName": "67%",
+    "seeMore": "67%",
+    "promoted": "0% \u2014 still no ads in sample",
+    "timestamp": "0% \u2014 no <time> element"
+  },
+  "recycling": {
+    "verdict": "STABLE",
+    "scrollerDescription": "main",
+    "scrolledBy": 3073.5,
+    "scrollActuallyHappened": true,
+    "detachedAfterScroll": 0,
+    "recycledSameNodeNewContent": 0,
+    "note": "VALID this time \u2014 the fixed script scrolled `main` by 3073px."
+  },
+  "extraFinding": {
+    "what": "componentkey prefixes vary within one post",
+    "observed": [
+      "expanded<id>FeedType_...",
+      "update-card-focus<id>FeedType_...",
+      "CgsIgIDXtN7e+LTQAQ-replaceableCommentTools<id>FeedType_..."
+    ],
+    "consequence": "The ^expanded-anchored regex gave the same post different identities depending on which element it saw. Fixed to match the 43-char base64url id regardless of prefix."
+  }
+}

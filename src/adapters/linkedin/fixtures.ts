@@ -14,7 +14,10 @@
  */
 
 export interface PostFixture {
-  /** The opaque per-post id. Must be >= 16 chars to pass the componentkey guard. */
+  /**
+   * The opaque per-post id. Real ones are exactly 43 base64url characters — anything else will
+   * not match `extractComponentKeyId`, which is deliberate. `padId()` normalises short test ids.
+   */
   id?: string
   author?: string
   href?: string
@@ -26,8 +29,14 @@ export interface PostFixture {
   variant?: 'MAIN_FEED_RELEVANCE' | 'MAIN_FEED_RECENT'
 }
 
+/** Pad a readable test id out to the real 43-char shape. */
+function padId(id: string): string {
+  const cleaned = id.replace(/[^A-Za-z0-9_-]/gu, '_')
+  return cleaned.length >= 43 ? cleaned.slice(0, 43) : cleaned.padEnd(43, 'x')
+}
+
 export function modernPostHtml(options: PostFixture = {}): string {
-  const id = options.id ?? '7cdbt_jwDmDtd5s0G2glmqfjUhVmI_JvbKvFl2n10wQ'
+  const id = padId(options.id ?? '7cdbt_jwDmDtd5s0G2glmqfjUhVmI_JvbKvFl2n10wQ')
   const key = `expanded${id}FeedType_${options.variant ?? 'MAIN_FEED_RELEVANCE'}`
   return `
     <div componentkey="${key}" id="${key}" role="listitem">

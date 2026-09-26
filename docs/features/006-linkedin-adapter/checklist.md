@@ -88,9 +88,9 @@ Raw output in `s4-results.json`. Account is on the **modern React/SDUI feed**
 `componentkey` strategy ranked above composite hashing, with a minimum-id-length guard so shared
 template keys (`body-key`) cannot collide the way prior art's does.
 
-- [ ] **Is the `componentkey` opaque id stable ACROSS RELOADS?** Unverified, and it matters: if it
-      is per-render, cross-session history silently fragments and every post looks new on every
-      visit. Cheap to check — reload the feed and diff the ids for a post that is still there.
+- [ ] **Is the `componentkey` opaque id stable ACROSS RELOADS?** Still unverified. Run 2 showed
+      the id is consistent across the three elements *within* one page, which is a different
+      question. Reload and diff for a post that is still present.
 
 **Two fields could not be tested:**
 
@@ -102,7 +102,14 @@ template keys (`body-key`) cannot collide the way prior art's does.
 
 **The recycling verdict is NOT trustworthy.**
 
-- [ ] It reported `STABLE: nodes persisted with their content`, but
+- [x] **ANSWERED in run 2: no recycling.** The fixed script scrolled the real container (`main`)
+      by 3073px and reported `STABLE` with 0 detached and 0 recycled. `WeakMap<Element, state>`
+      would in fact have been safe — but the watcher keys by post id anyway, which costs nothing
+      and stays correct if LinkedIn changes this.
+- [x] ~~It reported `STABLE`, but `scrollHeight` was identical before and after.~~ Fixed: the
+      script now finds the overflowing ancestor, reports `scrollerDescription` and `scrolledBy`,
+      and returns `INCONCLUSIVE` rather than `STABLE` when nothing moved.
+      Original wording follows for the record:
       `scrollHeightBefore === scrollHeightAfterScroll === 780`. **The page never actually
       scrolled.** 780px is far too short for a real feed, which means LinkedIn's modern build
       scrolls an inner container rather than `document.documentElement`, and the audit scrolled
@@ -147,3 +154,32 @@ template keys (`body-key`) cannot collide the way prior art's does.
 - [ ] The SPA retry is a fixed 20 × 500ms poll. Crude. LinkedIn client-side navigations away from
       and back to the feed are not handled at all — `webNavigation` is permissioned for exactly
       this and unused.
+
+
+## S4 run 2 — 2026-09-26 (fixed script)
+
+Raw in `s4-results-run2.json`. Same account, modern feed, 3 posts in DOM.
+
+**Recycling: ANSWERED.** Scroller was `main`, scrolled 3073px, verdict `STABLE` — 0 nodes
+detached, 0 recycled. Keying state by post id was therefore not strictly necessary, but it is kept
+because it costs nothing and survives LinkedIn changing its mind.
+
+**A real bug surfaced, and not by the audit itself — by a one-line follow-up query.** Listing every
+`componentkey` for a single post returned three elements with the SAME id under DIFFERENT prefixes:
+
+```
+expanded                                   <id>FeedType_MAIN_FEED_RELEVANCE
+update-card-focus                          <id>FeedType_MAIN_FEED_RELEVANCE
+CgsIgIDXtN7e+LTQAQ-replaceableCommentTools <id>FeedType_MAIN_FEED_RELEVANCE
+```
+
+The regex was anchored on `^expanded`, so the same post got a different identity — or none —
+depending on which element it was handed. Silent double-counting on the leaderboard. Fixed by
+matching the 43-character base64url id regardless of prefix; verified to produce one id across all
+three prefixes and across three separately captured posts.
+
+- [x] Test fixtures now use realistic 43-char ids. Several had invented 18-char ones that only
+      passed against the looser regex and could never occur in the wild.
+- [ ] **Still untested: sponsored detection.** Second run, second sample with no promoted posts
+      (`promotedByText: 0`). Needs a feed with ads.
+- [ ] Only 3 posts in the DOM this run, 8 last time. Both are small samples.

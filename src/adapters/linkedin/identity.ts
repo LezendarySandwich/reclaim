@@ -46,13 +46,30 @@ export interface PostIdentity {
 const ACTIVITY_URN = /urn:li:(?:activity|ugcPost|share):(\d+)/u
 
 /**
- * `expanded<opaque id>FeedType_<VARIANT>` on the modern feed's post roots.
+ * The opaque per-post id inside a modern-feed `componentkey`.
  *
- * The original candidate selector assumed `componentkey` STARTED with `expandedFeedType_`; S4
- * showed a 43-character opaque id sits between the two, which is the whole reason that selector
- * matched nothing. Requiring a minimum length keeps shared template keys out.
+ * Shape is `<prefix><43-char id>FeedType_<VARIANT>`, and the PREFIX VARIES. A single post carries
+ * at least three elements with the same id under different prefixes:
+ *
+ *   expanded<id>FeedType_MAIN_FEED_RELEVANCE
+ *   update-card-focus<id>FeedType_MAIN_FEED_RELEVANCE
+ *   CgsIgIDXtN7e+LTQAQ-replaceableCommentTools<id>FeedType_MAIN_FEED_RELEVANCE
+ *
+ * An earlier version anchored on `^expanded` and therefore produced a different (or no) id
+ * depending on which of those elements it was handed — so the same post could get two identities
+ * across renders, silently double-counting on the leaderboard.
+ *
+ * The id itself is a stable 43-character base64url run (base64url of 32 bytes), verified
+ * identical across all three prefixes on the same post and consistent across three separate
+ * captured posts. Matching on that shape rather than the prefix is what makes it prefix-agnostic.
+ *
+ * KNOWN LIMITATION: because prefixes are themselves base64url-legal, this takes the 43 characters
+ * immediately before `FeedType_` without knowing where the prefix ends. If LinkedIn ever shortens
+ * the id, we would silently absorb prefix characters — and since the prefix varies per element
+ * within one post, that breaks the one-id-per-post property and the leaderboard would
+ * double-count. A test pins the current behaviour so that change fails loudly.
  */
-const COMPONENT_KEY = /^expanded(.{16,})FeedType_/u
+const COMPONENT_KEY = /([A-Za-z0-9_-]{43})FeedType_/u
 
 /** FNV-1a. A cache key, not a security boundary — see src/core/cache.ts for why not SHA. */
 function hash(s: string): string {
