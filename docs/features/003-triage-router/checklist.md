@@ -85,3 +85,38 @@ _Append here. Strike through with a reason rather than deleting._
 - [ ] Non-native writing moved from `clean` to `ambiguous` under the new combination, so it now
       reaches the model more often. Safe direction — the model judges, not the router — but it is
       a small unmeasured increase in inference cost.
+
+## Two real missed posts — 2026-09-26
+
+Reported from a live feed. Measured rather than guessed, and they exposed three genuine gaps.
+
+| Post | Before | After |
+|---|---|---|
+| HTTP status codes as managers (emoji listicle, ends "What's your favorite HTTP code?") | **`clean`** 0.136 — never reached the model | `ambiguous` 0.500 |
+| "What your interview drink says about you" (12-item `Term: description` list) | `ambiguous` ai 0.200 | `ambiguous` ai 0.430 |
+
+- [x] **No feature for the `Term: description` listicle** — the commonest machine-written shape on
+      LinkedIn, and both misses were built entirely from it. Added `labelledListicle`, weighted on
+      both sides. It is structural rather than lexical, which is why it can carry real weight
+      without being a proxy for non-native or formal writing.
+- [x] **`concreteness` treated digit soup as substance.** The HTTP post scored a perfect 1.00 on
+      digit density alone — status codes 200/403/404/429/503 — which zeroed its `abstractness`
+      (the heaviest ai weight) AND applied a 30% discount to the rest. Numbers doubly suppressed
+      it. Digits now weigh 0.35 against proper nouns at 0.65, and the discount drops 0.3 → 0.15.
+      This is the fabricated-specificity failure logged earlier as unsolved, except the numbers
+      here were real — the lesson generalises: being full of numbers is not being about something.
+- [x] **`questionCloser` was a phrase list** and missed "What's your favorite HTTP code?". Now
+      structural: any question as the final line. A post ending by asking you something is
+      fishing for comments whatever the wording.
+- [x] Added `bulletRate` for non-emoji bullet glyphs (•, -, →). The HTTP post's list used `•`,
+      which `emojiBulletRate` ignored entirely.
+- [x] Prompt v2: the system prompt now describes the `Term: description` shape explicitly and
+      states that **accuracy does not redeem it** — an explainer can be correct, useful and still
+      entirely templated. Two few-shot anchors added using these exact two shapes, since the
+      anchors do most of the calibration work.
+
+- [ ] Whether the MODEL now rates these `blatant` is unverified. The router escalates them, which
+      is its whole job, but only a live run shows what Nano actually says. `ai_written` hides only
+      at `blatant` (ADR-025), so a `strong` rating still leaves them visible.
+- [ ] The HTTP post's concreteness is still 1.00 — it has genuine proper nouns too. The fix
+      reduced the damage rather than removing it.

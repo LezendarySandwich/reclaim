@@ -183,3 +183,68 @@ describe('emoji — the LinkedIn slop vocabulary', () => {
     expect(f.emojiBulletRate).toBe(0)
   })
 })
+
+describe('the label-listicle shape (two real missed posts)', () => {
+  // Both misses were built entirely from `Term: description` lines and the module was blind to
+  // it. One routed `clean` and never reached the model at all.
+  it('detects a Term: description run', () => {
+    const f = extractFeatures(
+      'Water: zero-aura npc energy.\nHot Coffee: corporate hustle-grindset core.\n' +
+        'Iced Tea: coastal-grandmother delusional.\nRed Bull: unhinged goblincore panic.',
+    )
+    expect(f.labelledListicle).toBeGreaterThan(0.5)
+  })
+
+  it('needs three lines — two is a coincidence, three is a format', () => {
+    expect(
+      extractFeatures('Water: something here.\nCoffee: something else here.').labelledListicle,
+    ).toBe(0)
+  })
+
+  it('does not fire on ordinary prose containing a colon', () => {
+    const f = extractFeatures(
+      'We shipped it on Tuesday: the migration took three weeks and went fine. ' +
+        'The hard part was the data, not the code. Thanks to everyone who helped out.',
+    )
+    expect(f.labelledListicle).toBe(0)
+  })
+
+  it('counts bullet glyphs, not just emoji', () => {
+    const f = extractFeatures('Key points:\n• First thing\n• Second thing\n• Third thing')
+    expect(f.bulletRate).toBeGreaterThan(0.5)
+    expect(f.emojiBulletRate).toBe(0)
+  })
+})
+
+describe('questionCloser is structural, not a phrase list', () => {
+  it('fires on any question as the final line', () => {
+    // "What's your favorite HTTP code?" was the closer on a real missed post and matched none of
+    // the original hardcoded phrases.
+    expect(extractFeatures('Some list of things.\n\nWhat is your favourite status code?').questionCloser).toBe(1)
+    expect(extractFeatures('Some thoughts on hiring.\n\nAgree?').questionCloser).toBe(1)
+  })
+
+  it('does not fire on a question in the middle', () => {
+    expect(
+      extractFeatures('Why does this happen? Because of how retries work. We fixed it on Tuesday.')
+        .questionCloser,
+    ).toBe(0)
+  })
+})
+
+describe('concreteness does not treat digit soup as substance', () => {
+  it('scores a number-dense explainer below a genuinely specific post', () => {
+    // An HTTP status-code post scored concreteness 1.00 purely on digits, which zeroed its
+    // abstractness and discounted its whole score — so a formulaic explainer read as maximally
+    // specific and routed `clean`.
+    const digitSoup = extractFeatures(
+      '200 means success. 301 means moved. 400 means bad request. 403 means forbidden. ' +
+        '404 means not found. 429 means too many. 500 means error. 503 means unavailable.',
+    )
+    const reallySpecific = extractFeatures(
+      'Priya and Tom spent Tuesday migrating the Stripe reconciliation job off the legacy ' +
+        'currency column in our Manchester Postgres cluster.',
+    )
+    expect(reallySpecific.concreteness).toBeGreaterThan(digitSoup.concreteness)
+  })
+})

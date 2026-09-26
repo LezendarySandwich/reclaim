@@ -41,6 +41,16 @@ export interface Features {
   paragraphUniformity: number
   /** High: mostly one-line paragraphs. LinkedIn "broetry". */
   oneLineParaRatio: number
+  /**
+   * High: the post is a `Term: description` listicle.
+   *
+   * The single most recognisable LLM-listicle shape on LinkedIn, and one the first version of
+   * this module was completely blind to. Two real missed posts — an HTTP-status-codes explainer
+   * and a "what your interview drink says about you" list — were both built entirely from it.
+   */
+  labelledListicle: number
+  /** High: many lines open with a bullet glyph of any kind, not just an emoji. */
+  bulletRate: number
 
   // --- construction -----------------------------------------------------------------------
   /** High: "not just X, but Y" / "It's not X. It's Y." antithesis. */
@@ -63,7 +73,13 @@ export interface Features {
   abstractness: number
 
   // --- engagement bait --------------------------------------------------------------------
-  /** High: closes by soliciting a reply ("Agree?", "Thoughts?"). */
+  /**
+   * High: closes by soliciting a reply.
+   *
+   * Originally a short list of exact phrases, which missed "What's your favorite HTTP code?" —
+   * the closer on a real post that slipped through. Now any question as the final line, which is
+   * the actual pattern: a listicle that ends by asking you something is fishing for comments.
+   */
   questionCloser: number
   /** High: asks for a comment to unlock something. Near-unambiguous bait. */
   commentGate: number
@@ -84,6 +100,8 @@ export const EMPTY_FEATURES: Features = {
   sentenceUniformity: 0,
   paragraphUniformity: 0,
   oneLineParaRatio: 0,
+  labelledListicle: 0,
+  bulletRate: 0,
   antithesisRate: 0,
   tricolonRate: 0,
   hedgingRate: 0,
@@ -160,8 +178,16 @@ const TRICOLON = /[^,.!?\n]{3,60},\s*[^,.!?\n]{3,60},\s*(?:and|or)\s+[^,.!?\n]{3
 const COMMENT_GATE =
   /\b(?:comment|drop|type)\s+(?:["'“”]?[A-Z]{2,}["'“”]?|below|the\s+word)\b[^.!?\n]{0,60}?(?:\b(?:i|we)\s+(?:will|can)\s+(?:send|dm|share|give)\b|\b(?:i|we)(?:'|’)ll\s+(?:send|dm|share|give)\b|\bto\s+(?:get|receive|unlock|download)\b)/giu
 
-const QUESTION_CLOSER =
-  /(?:^|\n)\s*(?:agree\?|thoughts\?|am\s+i\s+wrong\?|what\s+do\s+you\s+think\?|who\s+else\?|right\?)\s*$/iu
+// A question as the LAST line. Broader than a phrase list, because the pattern is structural:
+// a post that ends by asking you something is fishing for a comment, whatever the wording.
+const QUESTION_CLOSER = /\?\s*$/u
+
+// `Term: description` — a label of a few words, a colon, then prose. Requires the label to be
+// short and the description to be substantial, so ordinary prose containing a colon does not fire.
+const LABELLED_LINE = /^\s*[\p{L}\p{N}][\p{L}\p{N} '’&/()-]{1,28}:\s+\S{8,}/u
+
+// Any bullet glyph, not just emoji.
+const BULLET_LINE = /^\s*(?:[•·▪‣◦‧∙*+]|[-–—]\s|→|➡|›|»)\s*\S/u
 
 const TIME_CONTRAST =
   /\b\d{1,2}\s+(?:years?|months?|weeks?|days?)\s+ago\b[^]{0,200}?\b(?:today|now|fast\s+forward)\b/iu
@@ -215,6 +241,10 @@ export function extractFeatures(text: string): Features {
   const curly = (text.match(/[“”‘’]/gu) ?? []).length
 
   const emojiBulletLines = nonEmptyLines.filter((l) => EMOJI_BULLET_LINE.test(l)).length
+  const labelledLines = nonEmptyLines.filter((l) => LABELLED_LINE.test(l)).length
+  const bulletLines = nonEmptyLines.filter(
+    (l) => BULLET_LINE.test(l) || EMOJI_BULLET_LINE.test(l),
+  ).length
 
   EMOJI_GLOBAL.lastIndex = 0
   const allEmoji = text.match(EMOJI_GLOBAL) ?? []
@@ -227,9 +257,14 @@ export function extractFeatures(text: string): Features {
 
   const digits = (text.match(/\d/gu) ?? []).length
   const properNouns = count(text, PROPER_NOUN)
+  // Digits carry LESS weight than proper nouns. A post about HTTP status codes is saturated with
+  // numbers (200, 403, 404, 429, 503…) and scored a perfect 1.00 concreteness, which zeroed its
+  // abstractness AND discounted its whole ai score — so a formulaic explainer read as maximally
+  // specific. Numbers are domain vocabulary as often as they are evidence; names, places and
+  // dates are much harder to fake your way into.
   const concreteness = Math.min(
     1,
-    ramp(per100(digits), 4) * 0.5 + ramp(per100(properNouns), 6) * 0.5,
+    ramp(per100(digits), 6) * 0.35 + ramp(per100(properNouns), 6) * 0.65,
   )
 
   return {
@@ -249,6 +284,11 @@ export function extractFeatures(text: string): Features {
         ? paragraphs.filter((p) => !p.includes('\n') && p.split(/\s+/u).length <= 14).length /
           paragraphs.length
         : 0,
+    // Three is the floor: two labelled lines is a coincidence, three is a format.
+    labelledListicle: labelledLines >= 3 && nonEmptyLines.length > 0
+      ? Math.min(1, labelledLines / Math.max(4, nonEmptyLines.length * 0.4))
+      : 0,
+    bulletRate: nonEmptyLines.length ? bulletLines / nonEmptyLines.length : 0,
 
     antithesisRate: ramp(count(text, ANTITHESIS), 2),
     tricolonRate: ramp(count(text, TRICOLON), 2),
@@ -256,7 +296,7 @@ export function extractFeatures(text: string): Features {
     concreteness,
     abstractness: 1 - concreteness,
 
-    questionCloser: QUESTION_CLOSER.test(text.trim()) ? 1 : 0,
+    questionCloser: QUESTION_CLOSER.test(nonEmptyLines.at(-1) ?? '') ? 1 : 0,
     commentGate: count(text, COMMENT_GATE) > 0 ? 1 : 0,
     timeContrast: TIME_CONTRAST.test(text) ? 1 : 0,
     humbleOpener: HUMBLE_OPENER.test(text) ? 1 : 0,

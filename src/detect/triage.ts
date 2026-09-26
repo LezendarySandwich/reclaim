@@ -16,7 +16,7 @@ import type { TriageBand } from '../core/types'
  * Bumped whenever features or thresholds change. Load-bearing: it is part of the verdict cache
  * key (ADR-010), so bumping it invalidates every cached verdict automatically.
  */
-export const RULES_VERSION = 'triage-2026.09.26b-noisy-or-uncalibrated'
+export const RULES_VERSION = 'triage-2026.09.26c-listicle-uncalibrated'
 
 /**
  * Below this, every rate feature is noise — one em-dash in a twelve-word post is a rate of 8 per
@@ -54,6 +54,10 @@ const BAIT_WEIGHTS: Partial<Record<keyof Features, number>> = {
   slopEmojiRate: 0.3,
   emojiDensity: 0.15,
   allCapsHookRate: 0.2,
+  // A listicle that ends by asking you something is fishing for comments. Weighted on both
+  // sides because the shape serves bait and signals templating equally.
+  labelledListicle: 0.3,
+  bulletRate: 0.15,
 }
 
 /**
@@ -67,6 +71,11 @@ const BAIT_WEIGHTS: Partial<Record<keyof Features, number>> = {
  */
 const AI_WEIGHTS: Partial<Record<keyof Features, number>> = {
   abstractness: 0.3,
+  // Structural templating. Independent of vocabulary, so unlike the lexical tells it is not a
+  // proxy for non-native or formal writing — a second-language writer telling you about their
+  // week does not produce twelve `Term: description` lines.
+  labelledListicle: 0.35,
+  bulletRate: 0.15,
   sentenceUniformity: 0.22,
   antithesisRate: 0.22,
   // The 🚀/💡/✅/👉 vocabulary carries real weight on this side. Unlike the lexical tells, it is
@@ -83,8 +92,15 @@ const AI_WEIGHTS: Partial<Record<keyof Features, number>> = {
   curlyPunctRate: 0.08,
 }
 
-/** Concrete, specific writing is the strongest counter-signal we have. */
-const CONCRETENESS_DISCOUNT = 0.3
+/**
+ * Concrete, specific writing is a counter-signal — but a weaker one than it first appeared.
+ *
+ * Was 0.3. An HTTP-status-codes explainer scored concreteness 1.00 purely on digit density, which
+ * zeroed its abstractness AND cut its remaining score by a third, so a thoroughly formulaic post
+ * routed `clean` and never reached the model. Being full of numbers is not the same as being
+ * about something.
+ */
+const CONCRETENESS_DISCOUNT = 0.15
 
 /**
  * Combine signals as independent evidence, not as a weighted average.

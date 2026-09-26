@@ -19,7 +19,7 @@
 import type { Axis } from '../core/types'
 
 /** Bumped when the prompt or schema changes. Feeds the verdict cache key with RULES_VERSION. */
-export const PROMPT_VERSION = 'p1-2026.09.26'
+export const PROMPT_VERSION = 'p2-2026.09.26-listicle'
 
 export const LADDER = ['none', 'slight', 'some', 'clear', 'strong', 'blatant'] as const
 export type Rung = (typeof LADDER)[number]
@@ -78,10 +78,18 @@ ENGAGEMENT BAIT — writing engineered to farm reactions rather than say somethi
 - fake humility or manufactured vulnerability as an opener
 
 TEMPLATED — writing that reads as generic, formulaic filler:
-- no specifics: no names, numbers, dates, or concrete events
+- **the "Term: description" listicle** — a long run of short labels each followed by a one-line
+  characterisation. This is the commonest machine-written format on LinkedIn. It stays templated
+  even when the individual lines are witty, and even when it is packed with real facts, jargon or
+  numbers. Judge the SHAPE, not whether the content happens to be accurate.
+- no specifics: no names, dates, or concrete events from the writer's own experience
 - interchangeable advice that would fit any industry
 - "It's not X. It's Y." antithesis, rule-of-three lists, uniform sentence rhythm
-- emoji-bulleted listicles (🚀 💡 ✅ 👉)
+- emoji-bulleted listicles (🚀 💡 ✅ 👉) and bullet-glyph lists
+- a question tacked on the end of a list to solicit comments
+
+A post can be BOTH templated and factually correct. An explainer that is accurate, useful and
+built entirely from a formulaic list template is still templated.
 
 Use this scale for each:
 none    — no trace of it
@@ -116,6 +124,17 @@ export const FEW_SHOTS: ReadonlyArray<{ post: string; response: string }> = [
   {
     post: 'I am very happy to share that I have completed my master degree. It was not easy journey. I want to thank my supervisor who guide me all this time.',
     response: '{"bait":"none","ai":"none","reason":"sincere, specific to the writer"}',
+  },
+  {
+    // Factually correct, genuinely informative, and entirely a template. Anchors the judgement
+    // that accuracy does not redeem the shape — a real post in this form routed clean and was
+    // never judged, which is what prompted adding it.
+    post: '💻 HTTP Status Codes, explained as managers.\n🟢 200: the OK manager. You ask, you get an answer.\n🚫 404: the not-found manager. No idea what you are talking about.\n🔥 503: the unavailable manager. In meetings until Q3.\nWhat is your favourite status code?',
+    response: '{"bait":"clear","ai":"blatant","reason":"label-per-line template, closes by asking"}',
+  },
+  {
+    post: 'Water: zero-aura npc energy. Hot Coffee: corporate-brained hustle-grindset core. Iced Tea: coastal-grandmother delusional. Red Bull: unhinged goblincore panic attack. Tea: secretly evil soft-launch villain era.',
+    response: '{"bait":"some","ai":"blatant","reason":"twelve-item label listicle, no substance"}',
   },
 ]
 
