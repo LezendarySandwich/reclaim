@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeedWatcher } from './watcher'
 import { LinkedInAdapter } from '../adapters/linkedin/adapter'
-import { SAMPLE, clearFeed, modernPostHtml, renderModernFeed } from '../adapters/linkedin/fixtures'
+import {
+  SAMPLE,
+  clearFeed,
+  REAL_PROMOTED_COMPANY_ACTOR,
+  firstPostElement,
+  followedPageAdHtml,
+  modernPostHtml,
+  renderModernFeed,
+} from '../adapters/linkedin/fixtures'
 import type { Verdict } from '../core/types'
 import type { TriagedPost } from '../core/messages'
 
@@ -243,5 +251,88 @@ describe('queue ordering favours what is arriving', () => {
     await new Promise((r) => setTimeout(r, 20))
     // Both land in one batch; the newest-queued is at the front of it.
     expect(seen[0]?.length).toBeGreaterThan(0)
+  })
+})
+
+describe('late hydration', () => {
+  /** Mutate the post in place, the way LinkedIn's SDUI feed actually fills a card in. */
+  function hydrate(html: string): void {
+    const el = firstPostElement()
+    const holder = document.createElement('div')
+    holder.innerHTML = html
+    el.insertBefore(holder, el.firstChild)
+  }
+
+  async function settle(ms = 30) {
+    await new Promise((r) => setTimeout(r, ms))
+  }
+
+  it('catches an ad whose Promoted label paints after its body text', async () => {
+    // The reported miss. The body renders first, the router clears it as ordinary marketing
+    // prose, and the actor block carrying "Promoted" arrives a frame or two later. `done` used to
+    // be terminal, so the label was never seen and the ad stayed visible — intermittently,
+    // depending on which part of the card won the race.
+    renderModernFeed([followedPageAdHtml(false)])
+    const classify = vi.fn(async (_posts: TriagedPost[]): Promise<Verdict[]> => [])
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
+    await settle()
+    expect(classify).not.toHaveBeenCalled() // cleared on the evidence available
+
+    hydrate(REAL_PROMOTED_COMPANY_ACTOR)
+    await settle()
+    FakeIO.instances[0]!.fireAll()
+    await settle()
+
+    expect(classify).toHaveBeenCalled()
+    expect(classify.mock.calls[0]![0][0]!.post.isPromoted).toBe(true)
+  })
+
+  it('does not reopen when a re-render changes nothing', async () => {
+    renderModernFeed([modernPostHtml({ id: 'stablepostaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', body: CLEAN })])
+    const classify = vi.fn(async (): Promise<Verdict[]> => [])
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
+    await settle()
+
+    // A cosmetic mutation: LinkedIn swaps a class, no text and no label change.
+    firstPostElement().setAttribute('class', 'x')
+    await settle()
+
+    expect(classify).not.toHaveBeenCalled()
+  })
+
+  it('does not reopen when evidence shrinks', async () => {
+    // A partial re-render, or the user collapsing "see more", makes text disappear. That is not a
+    // new reason to hide anything, and treating it as news would let a re-render relitigate a post
+    // the user has already been shown.
+    renderModernFeed([modernPostHtml({ id: 'shrinkingpostaaaaaaaaaaaaaaaaaaaaaaaaaaaa', body: CLEAN })])
+    const classify = vi.fn(async (): Promise<Verdict[]> => [])
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
+    await settle()
+
+    document.querySelector('[data-testid="expandable-text-box"]')!.textContent = CLEAN.slice(0, 30)
+    await settle()
+
+    expect(classify).not.toHaveBeenCalled()
+  })
+
+  it('stops reopening a post that mutates pathologically', async () => {
+    renderModernFeed([followedPageAdHtml(false)])
+    const classify = vi.fn(async (): Promise<Verdict[]> => [])
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify, auditRate: 0 }).start()
+    await settle()
+
+    // Ten rounds of growing text, each one draining the queue so a reopen really does cost an
+    // inference. Without a cap this is ten calls.
+    for (let i = 0; i < 10; i++) {
+      const box = document.querySelector('[data-testid="expandable-text-box"]')!
+      // Grow with bait, so each reopen actually routes to the model and costs something.
+      box.textContent = `${box.textContent} ${BAIT}`
+      await settle(10)
+      FakeIO.instances[0]!.fireAll()
+      await settle(10)
+    }
+
+    expect(classify.mock.calls.length).toBeGreaterThan(0)
+    expect(classify.mock.calls.length).toBeLessThanOrEqual(3)
   })
 })

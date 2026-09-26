@@ -57,6 +57,24 @@ const BATCH_SIZE = 6
  */
 const AUDIT_SAMPLE_RATE = 0.05
 
+/**
+ * How many times one post may be reopened after being resolved.
+ *
+ * Reopening is driven by evidence changing, and the two things that can change are both close to
+ * monotonic — `isPromoted` goes false→true once, and text grows as the post finishes rendering or
+ * the user expands it. Three is slack for a noisy hydration, not a budget anything should reach;
+ * the cap exists so a pathologically mutating page cannot put a post in a scan/classify loop.
+ */
+const MAX_REOPENS = 3
+
+/**
+ * Text growth that counts as new evidence, in characters.
+ *
+ * Small enough to catch a post that first painted truncated, large enough that trailing-whitespace
+ * and entity-decoding jitter between renders does not trip it.
+ */
+const TEXT_GROWTH_THRESHOLD = 40
+
 export interface WatcherDeps {
   adapter: SiteAdapter
   /** Sends a batch for classification. Returns verdicts, or rejects. */
@@ -93,6 +111,14 @@ export class FeedWatcher {
   readonly #triage = new Map<string, ReturnType<typeof route>>()
   /** Posts selected as router-audit samples. */
   readonly #audit = new Set<string>()
+  /**
+   * The evidence a `done` post was resolved on, so a later render can be detected as different.
+   *
+   * See `#evidenceOf`. Only `done` posts need an entry — every other state is re-derived anyway.
+   */
+  readonly #resolvedOn = new Map<string, string>()
+  /** Reopen count per post, to bound churn if a page mutates pathologically. */
+  readonly #reopens = new Map<string, number>()
 
   #mutationObserver: MutationObserver | null = null
   #intersectionObserver: IntersectionObserver | null = null
@@ -170,7 +196,25 @@ export class FeedWatcher {
       if (pending) continue
 
       const state = this.#state.get(post.id)
-      if (state === 'done' || state === 'queued' || state === 'triaged') continue
+      if (state === 'queued' || state === 'triaged') continue
+
+      // `done` is not quite final.
+      //
+      // LinkedIn's SDUI feed hydrates a post in pieces, and the order is not guaranteed: the body
+      // text can paint before the actor block that carries the "Promoted" label. A post resolved
+      // in that window was judged on evidence that was still arriving, and because `done` used to
+      // be terminal the label landing 50ms later was never seen. That is why *some* ads were
+      // getting through while others were caught — a race, not a bad selector.
+      //
+      // Re-extracting costs nothing here: `extract()` above already ran for every post on every
+      // scan, and its result was simply discarded at this line.
+      if (state === 'done') {
+        if (!this.#evidenceChanged(post.id, post)) continue
+        const seen = this.#reopens.get(post.id) ?? 0
+        if (seen >= MAX_REOPENS) continue
+        this.#reopens.set(post.id, seen + 1)
+        this.#audit.delete(post.id)
+      }
 
       // TRIAGE NOW, not when the post nears the viewport.
       //
@@ -190,6 +234,7 @@ export class FeedWatcher {
 
       if (!mustClassify && !audit) {
         this.#state.set(post.id, 'done')
+        this.#resolvedOn.set(post.id, this.#evidenceOf(post))
         continue
       }
       if (audit) this.#audit.add(post.id)
@@ -197,6 +242,35 @@ export class FeedWatcher {
       this.#state.set(post.id, 'triaged')
       this.#intersectionObserver?.observe(el)
     }
+  }
+
+  /**
+   * A fingerprint of everything a routing decision was made from.
+   *
+   * Deliberately not the full text — this is compared on every scan, and the point is only to
+   * notice that the evidence moved, not to reproduce it.
+   */
+  #evidenceOf(post: { isPromoted: boolean; text: string }): string {
+    return `${post.isPromoted ? 'p' : '-'}:${post.text.length}`
+  }
+
+  /**
+   * Has the evidence changed in a direction that could change the answer?
+   *
+   * Asymmetric on purpose. A post gaining the "Promoted" label or gaining text may now warrant
+   * hiding, so it is reconsidered. A post *losing* either — which is what a partial re-render or a
+   * collapsed "see more" looks like — must not reopen anything: there is no new reason to hide it,
+   * and treating shrinkage as news would let a re-render undo a decision the user already saw.
+   */
+  #evidenceChanged(id: string, post: { isPromoted: boolean; text: string }): boolean {
+    const before = this.#resolvedOn.get(id)
+    if (before === undefined) return false
+    const now = this.#evidenceOf(post)
+    if (now === before) return false
+
+    const [wasPromoted, wasLength] = before.split(':') as [string, string]
+    if (post.isPromoted && wasPromoted !== 'p') return true
+    return post.text.length - Number(wasLength) >= TEXT_GROWTH_THRESHOLD
   }
 
   #enqueue(el: Element): void {

@@ -3,6 +3,7 @@ import { LinkedInAdapter, outermostOnly } from './adapter'
 import {
   clearFeed,
   modernPostHtml,
+  followedPageAdHtml,
   realPromotedPostHtml,
   renderLegacyFeed,
   socialContextPostHtml,
@@ -425,5 +426,45 @@ describe('author attribution on a "X commented" card', () => {
     adapter.detectProfile(document)
     const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
     expect(adapter.extract(el)!.post.authorName).toBe('Alice Smith')
+  })
+})
+
+
+describe('a promoted post inside a follow banner', () => {
+  // Reported miss. A person's "follows this page" banner wraps a company's promoted post, so the
+  // first /in/ link in the card belongs to someone who did not write it.
+  it('reads the Promoted label', () => {
+    renderModernFeed([followedPageAdHtml()])
+    adapter.detectProfile(document)
+    const posts = adapter.findPosts(adapter.findFeedRoot(document)!)
+    expect(posts).toHaveLength(1)
+    expect(adapter.extract(posts[0]!)?.post.isPromoted).toBe(true)
+  })
+
+  it('attributes the post to the company, not the person who follows it', () => {
+    renderModernFeed([followedPageAdHtml()])
+    adapter.detectProfile(document)
+    const posts = adapter.findPosts(adapter.findFeedRoot(document)!)
+    expect(adapter.extract(posts[0]!)?.post.authorName).toBe('Redpanda Data')
+  })
+
+  it('is not promoted before the company actor block has painted', () => {
+    // The mid-hydration state. Establishes that the watcher's reopen path is load-bearing: the
+    // adapter genuinely cannot tell this is an ad yet, and is right not to.
+    renderModernFeed([followedPageAdHtml(false)])
+    adapter.detectProfile(document)
+    const posts = adapter.findPosts(adapter.findFeedRoot(document)!)
+    expect(posts).toHaveLength(1)
+    expect(adapter.extract(posts[0]!)?.post.isPromoted).toBe(false)
+  })
+
+  it('keeps the same post id across hydration, so the reopen lands on the same row', () => {
+    renderModernFeed([followedPageAdHtml(false)])
+    adapter.detectProfile(document)
+    const before = adapter.extract(adapter.findPosts(adapter.findFeedRoot(document)!)[0]!)?.post.id
+    renderModernFeed([followedPageAdHtml()])
+    adapter.detectProfile(document)
+    const after = adapter.extract(adapter.findPosts(adapter.findFeedRoot(document)!)[0]!)?.post.id
+    expect(after).toBe(before)
   })
 })

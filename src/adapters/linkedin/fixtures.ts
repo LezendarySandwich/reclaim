@@ -71,6 +71,19 @@ export function clearFeed(doc: Document = document): void {
   doc.body.removeAttribute('data-rehydrated')
 }
 
+/**
+ * The first rendered post element.
+ *
+ * Exists so watcher tests can mutate a post without naming a LinkedIn selector — the watcher is
+ * site-agnostic and an invariant test enforces that its tests are too (ADR-004). Selector
+ * knowledge belongs in `src/adapters/`, which is where this lives.
+ */
+export function firstPostElement(doc: Document = document): Element {
+  const el = doc.querySelector('[componentkey*="FeedType_MAIN_FEED"]')
+  if (!el) throw new Error('no post rendered — call renderModernFeed first')
+  return el
+}
+
 /** Realistic sample text, so triage behaviour in watcher tests is not an artefact of lorem ipsum. */
 export const SAMPLE = {
   bait:
@@ -112,6 +125,62 @@ export function realPromotedPostHtml(body: string): string {
   return `<div componentkey="${key}" id="${key}" role="listitem">
     ${REAL_PROMOTED_ACTOR_BLOCK}
     <div data-testid="expandable-text-box"><span>${body}</span></div>
+  </div>`
+}
+
+/**
+ * A real promoted post reported as not hiding, reduced from the captured DOM.
+ *
+ * Two things make it distinct from `REAL_PROMOTED_ACTOR_BLOCK`, and both were reported misses:
+ *
+ *  1. A *person's* follow banner ("Harsh Vardhan follows this page") sits above a *company's*
+ *     promoted post, so the first `/in/` link in document order belongs to someone who is not the
+ *     author. Author attribution must resolve to the company.
+ *  2. The root componentkey carries `FeedType_MAIN_FEED_RELEVANCE` — the SAME FeedType as an
+ *     organic post. Ads are not distinguishable by feed type, which killed a tempting shortcut.
+ *
+ * The real capture also nests a 13-page document carousel with its own spinners and slider; it is
+ * dropped here because nothing in it bears on detection, and the element count still leaves the
+ * "Promoted" label at index 14 of the scan, well inside the cap.
+ */
+export const REAL_FOLLOW_BANNER =
+  '<h2><span>Feed post</span><span aria-hidden="true"></span></h2>' +
+  // The follow banner. Its /in/ link precedes the actor block.
+  '<div><a href="https://www.linkedin.com/in/harshv07/"><figure aria-hidden="true"></figure></a>' +
+  '<div><p><span><a aria-label="View Harsh Vardhan’s profile" href="https://www.linkedin.com/in/harshv07/">' +
+  '<strong>Harsh Vardhan</strong></a><span> </span>follows this page</span></p></div>' +
+  '<button type="button" aria-label="Open control menu for post by Redpanda Data"><span></span></button></div>'
+
+/** The company actor block. In the reported miss this painted *after* the body text. */
+export const REAL_PROMOTED_COMPANY_ACTOR =
+  '<div><a href="https://www.linkedin.com/company/redpanda-data/"><figure>' +
+  '<img alt="View company: Redpanda Data" src="https://media.licdn.com/dms/image/redpanda_data_logo">' +
+  '</figure></a><div><div><div><div>' +
+  '<a href="https://www.linkedin.com/company/redpanda-data/">' +
+  '<div><div aria-label="Redpanda Data Verified"><div><div><p><span>Redpanda Data</span></p></div></div>' +
+  '<div><p><span><span> </span><span aria-hidden="true"></span></span></p></div></div></div></a>' +
+  '</div></div><div><p><span>27,057 followers</span></p></div><div><div></div></div>' +
+  '<div><p componentkey="c4aea676-7d9c-41bd-97eb-64995c6f277c"><span>Promoted</span></p></div>' +
+  '</div></div>'
+
+/** Ad copy from the same capture. Reads as ordinary marketing prose — the router clears it. */
+export const REAL_AD_BODY =
+  'Redpanda Streaming is designed to connect data from any source and handle any Kafka workload, ' +
+  '10X faster and 6X more cost-effectively — reducing the total cost of ownership of running Kafka workloads.'
+
+/**
+ * The followed-page ad as a full post. `withLabel: false` renders the same post mid-hydration,
+ * before the actor block (and so the "Promoted" label) has painted.
+ */
+export function followedPageAdHtml(withLabel = true): string {
+  const id = 'mLWnuh6UNLNjwC9pXe5-7YigEJQ7tn5IkXokeiC0PSE'
+  const key = `update-card-focus${id}FeedType_MAIN_FEED_RELEVANCE`
+  // Mid-hydration, the banner and body are painted and the company actor block is not. The card
+  // is already a recognisable post at that point — which is exactly why it got resolved early.
+  const actor = REAL_FOLLOW_BANNER + (withLabel ? REAL_PROMOTED_COMPANY_ACTOR : '')
+  return `<div componentkey="${key}" id="${key}" role="listitem">
+    ${actor}
+    <div data-testid="expandable-text-box"><span>${REAL_AD_BODY}</span></div>
   </div>`
 }
 
