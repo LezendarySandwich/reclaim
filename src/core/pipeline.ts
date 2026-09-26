@@ -49,13 +49,24 @@ export async function classifyBatch(
   const { engine, settings, engineState, rulesVersion } = deps
 
   const buildSignals = (
-    heuristics: Partial<Record<Axis, number>>,
+    triaged: TriagedPost,
     model: Partial<Record<Axis, number>> | null,
   ): Array<{ axis: Axis; signal: ContentSignal }> => {
     const out: Array<{ axis: Axis; signal: ContentSignal }> = []
-    for (const [axis, score] of Object.entries(heuristics) as [Axis, number][]) {
+    for (const [axis, score] of Object.entries(triaged.heuristics) as [Axis, number][]) {
       out.push({ axis, signal: { score, source: 'heuristic' } })
     }
+
+    // The page said so itself. A structural fact, not a judgement — hence source 'metadata',
+    // which `mergeVerdict` allows to decide for this axis alone, and which works with no model
+    // at all (ADR-026).
+    if (triaged.post.isPromoted) {
+      out.push({
+        axis: 'sponsored',
+        signal: { score: 100, source: 'metadata', reason: 'LinkedIn labelled this Promoted' },
+      })
+    }
+
     if (model) {
       for (const [axis, score] of Object.entries(model) as [Axis, number][]) {
         out.push({ axis, signal: { score, source: 'model' } })
@@ -77,7 +88,7 @@ export async function classifyBatch(
     })
     const { verdict } = mergeVerdict({
       post: triaged.post,
-      signals: buildSignals(triaged.heuristics, model),
+      signals: buildSignals(triaged, model),
       settings,
       engineState,
       engineId: engine.id,

@@ -120,13 +120,34 @@ function readMedia(postEl: Element, profile: SelectorProfile): MediaRef[] {
   }))
 }
 
+/** How many lines from the top of a post the "Promoted" label can appear on. */
+const PROMOTED_LABEL_SCAN_LINES = 8
+
 function isPromoted(postEl: Element, profile: SelectorProfile): boolean {
   if (queryFirst(postEl, profile.sponsored)) return true
-  // Structural markers alone miss cases, and every one of them scored 0/8 in S4 because the
-  // sample had no ads — so the multilingual label check is not redundant belt-and-braces, it is
-  // currently the only tested half.
-  const head = (postEl.textContent ?? '').slice(0, 400)
-  return PROMOTED_LABELS.some((label) => head.includes(label))
+
+  // The label must be a line OF ITS OWN near the top, not a substring anywhere.
+  //
+  // A substring check would fire on "I was promoted to Senior Engineer" — among the most common
+  // posts on LinkedIn — and hiding somebody's promotion announcement as an advert is about the
+  // worst false positive this extension could produce. Real ads render the label standalone in
+  // the actor block:
+  //
+  //     PagerDuty
+  //     72,083 followers
+  //     Promoted
+  //
+  // Structural markers alone are not enough either: every sponsored selector scored 0/8 in S4
+  // because the sample contained no ads, so both halves are load-bearing.
+  const lines = (postEl.textContent ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, PROMOTED_LABEL_SCAN_LINES)
+
+  return lines.some((line) =>
+    PROMOTED_LABELS.some((label) => line.toLowerCase() === label.toLowerCase()),
+  )
 }
 
 export class LinkedInAdapter implements SiteAdapter {

@@ -34,6 +34,29 @@ const SOURCE_RANK: Record<SignalSource, number> = {
 /** Sources permitted to drive a `collapse`. Note the deliberate absence of `heuristic`. */
 const CAN_DECIDE: ReadonlySet<SignalSource> = new Set<SignalSource>(['model'])
 
+/**
+ * Axes where a `metadata` signal may decide on its own.
+ *
+ * Narrow by design. A metadata signal is a structural fact read off the page rather than a
+ * judgement — for `sponsored` that fact is LinkedIn's own "Promoted" label, which involves no
+ * inference and carries none of the false-positive risk that motivated ADR-004. There is nothing
+ * for a model to add.
+ *
+ * `ai_written` is deliberately absent and must stay absent: a metadata signal there would be a
+ * second path to collapse that bypasses the model, which is exactly the shape ADR-005 exists to
+ * prevent.
+ */
+const METADATA_DECIDES: ReadonlySet<Axis> = new Set<Axis>(['sponsored'])
+
+/**
+ * Axes that can hide without a working model (ADR-026).
+ *
+ * Only `sponsored`. Requiring a 4.27 GB download before the extension will hide an advert that
+ * the page has already labelled "Promoted" would be absurd — the detection needs no inference at
+ * all. Every other axis stays behind the fail-open gate.
+ */
+const NEEDS_NO_ENGINE: ReadonlySet<Axis> = new Set<Axis>(['sponsored'])
+
 export interface MergeInput {
   post: Pick<Post, 'id' | 'authorUrn'>
   /** All signals gathered for this post, in any order, possibly several per axis. */
@@ -102,12 +125,7 @@ export function mergeVerdict(input: MergeInput): MergeResult {
     reason,
   })
 
-  // ---- Reasons to show, checked before any reason to hide. Order matters only for the
-  // ---- reported reason; each is independently sufficient.
-
-  // ADR-005. The single gate that makes fail-open real. Scores are still recorded, so shadow data
-  // keeps accumulating while the model is unavailable — but nothing hides.
-  if (!canHide(engineState)) return show('no_model')
+  // ---- Reasons to show, checked before any reason to hide.
 
   // ADR-006 / calibration. Global shadow computes everything and hides nothing.
   if (settings.shadowMode) return show('shadow_mode')
@@ -116,8 +134,9 @@ export function mergeVerdict(input: MergeInput): MergeResult {
   // the accuracy denominator unbiased and lets the user see what would have been hidden.
   if (settings.allowlist.includes(post.authorUrn)) return show('allowlisted')
 
-  // ---- Now, and only now, consider hiding.
+  // ---- Now consider hiding, axis by axis.
 
+  const engineReady = canHide(engineState)
   const triggeredBy: Axis[] = []
   let sawDecidingSignal = false
 
@@ -128,13 +147,24 @@ export function mergeVerdict(input: MergeInput): MergeResult {
     // ADR-019: only `enabled` may collapse. `shadow` is recorded above and stops here.
     if (effectiveMode(setting.mode, settings.shadowMode) !== 'enabled') continue
 
+    // ADR-005, applied per axis rather than to the whole verdict. Everything that requires
+    // inference stays behind the model gate; `sponsored` does not, because reading a label the
+    // page already rendered is not inference (ADR-026).
+    if (!engineReady && !NEEDS_NO_ENGINE.has(axis)) continue
+
     // ADR-004: a heuristic may route, never judge. It is already in `recorded`; it just cannot
-    // be the thing that hides a post.
-    if (!CAN_DECIDE.has(signal.source)) continue
+    // be the thing that hides a post. `metadata` may decide only where the signal is a
+    // structural fact rather than a judgement.
+    const mayDecide = CAN_DECIDE.has(signal.source) ||
+      (signal.source === 'metadata' && METADATA_DECIDES.has(axis))
+    if (!mayDecide) continue
 
     sawDecidingSignal = true
     if (signal.score >= setting.threshold) triggeredBy.push(axis)
   }
+
+  // Preserve the old reported reason for the common case: no model, nothing hid.
+  if (triggeredBy.length === 0 && !engineReady && !sawDecidingSignal) return show('no_model')
 
   if (triggeredBy.length === 0) {
     return show(sawDecidingSignal ? 'below_threshold' : 'no_deciding_signal')

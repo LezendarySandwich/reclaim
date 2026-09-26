@@ -183,3 +183,25 @@ three prefixes and across three separately captured posts.
 - [ ] **Still untested: sponsored detection.** Second run, second sample with no promoted posts
       (`promotedByText: 0`). Needs a feed with ads.
 - [ ] Only 3 posts in the DOM this run, 8 last time. Both are small samples.
+
+## Sponsored filtering — 2026-09-26
+
+- [x] **`isPromoted` was extracted and never used.** It had been in `Post` since the adapter was
+      written and nothing converted it into a signal, so the sponsored axis could not have fired
+      even when switched on. Dead data that looked like a working feature.
+- [x] **Promoted detection was a substring match** — `textContent.includes('Promoted')` — which
+      would have hidden *"I was promoted to Senior Engineer"*. Now requires the label to be a line
+      of its own in the first eight lines, matched exactly and case-insensitively. Three tests.
+- [x] The watcher now always classifies a promoted post even when the router says `clean`. Ad copy
+      is frequently well written and routes clean; the sponsored axis decides on the page's label
+      rather than the prose, so skipping would have meant never hiding a well-written advert.
+- [x] Sponsored hides with no model (ADR-026), via narrow `METADATA_DECIDES` / `NEEDS_NO_ENGINE`
+      sets in `verdict.ts`.
+
+- [ ] **Still never tested against a real ad.** Both S4 runs had zero promoted posts, so every
+      structural selector (`[componentkey="sponsored-indicator-key"]`,
+      `[data-sponsored-tracking-url]`, `[data-view-tracking-scope*="SPONSORED"]`) remains
+      unverified. Only the text-label path has evidence behind it, and that evidence is two posts
+      pasted into a chat rather than captured markup.
+- [ ] The 20-locale label list is untested beyond German. If LinkedIn renders the label with
+      surrounding punctuation or a bullet separator in some locales, exact line matching misses it.

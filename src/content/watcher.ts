@@ -182,7 +182,12 @@ export class FeedWatcher {
           }
 
           const triage = route(extracted.post.text)
-          if (!needsModel(triage.band)) {
+
+          // A promoted post must always be classified, whatever the router thinks of its prose.
+          // Ad copy is often perfectly well written and routes `clean`, and the sponsored axis
+          // decides on the page's own label rather than on the text — so skipping here would
+          // mean never hiding an advert whose wording happens to be good.
+          if (!extracted.post.isPromoted && !needsModel(triage.band)) {
             // Cheap and confident: the model never needs to see this.
             this.#state.set(id, 'done')
             continue

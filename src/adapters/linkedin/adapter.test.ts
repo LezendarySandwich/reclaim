@@ -280,3 +280,45 @@ describe('author name — the "this author" bug', () => {
     expect(adapter.extract(el)!.post.authorName).toBe('Alice Smith-Jones')
   })
 })
+
+describe('promoted detection must not eat promotion announcements', () => {
+  it('detects a real ad, where the label is its own line', () => {
+    modernFeed([modernPost({ author: 'PagerDuty', body: 'See how leading SRE teams delegate triage.', promotedLabel: 'Promoted' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(true)
+  })
+
+  it('does NOT fire on "I was promoted to Senior Engineer"', () => {
+    // The trap. A substring check on "Promoted" would hide one of the most common posts on
+    // LinkedIn — somebody announcing a promotion — as an advert. About the worst false positive
+    // this extension could produce.
+    modernFeed([
+      modernPost({
+        author: 'Alice Smith',
+        body: 'Thrilled to share that I was promoted to Senior Engineer this week after four years on the platform team.',
+      }),
+    ])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(false)
+  })
+
+  it('does not fire on a post merely discussing promotions', () => {
+    modernFeed([
+      modernPost({
+        body: 'Some thoughts on how promotion committees actually work, and why being promoted is not the same as being ready.',
+      }),
+    ])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(false)
+  })
+
+  it('handles non-English labels', () => {
+    modernFeed([modernPost({ promotedLabel: 'Gesponsert' })])
+    adapter.detectProfile(document)
+    const el = adapter.findPosts(adapter.findFeedRoot(document)!)[0]!
+    expect(adapter.extract(el)!.post.isPromoted).toBe(true)
+  })
+})

@@ -120,7 +120,12 @@ describe('axis modes (ADR-019)', () => {
   })
 
   it('an off axis is neither recorded nor able to trigger', () => {
-    const r = mergeVerdict(input({ signals: [{ axis: 'sponsored', signal: sig(100) }] }))
+    // Set the mode explicitly rather than relying on a default — `sponsored` was the example
+    // here until ADR-026 enabled it, and the test was checking the default rather than the
+    // mechanism.
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.axes.sponsored.mode = 'off'
+    const r = mergeVerdict(input({ settings, signals: [{ axis: 'sponsored', signal: sig(100) }] }))
     expect(r.verdict.action).toBe('show')
     expect(r.verdict.signals.sponsored).toBeUndefined()
   })
@@ -302,5 +307,65 @@ describe('ai_written at high confidence only (ADR-025)', () => {
     expect(DEFAULT_SETTINGS.axes.ai_written.threshold).toBeGreaterThan(
       DEFAULT_SETTINGS.axes.engagement_bait.threshold,
     )
+  })
+})
+
+describe('sponsored — structural fact, not inference (ADR-026)', () => {
+  const promoted = [
+    { axis: 'sponsored' as Axis, signal: { score: 100, source: 'metadata' as SignalSource } },
+  ]
+
+  it('hides a promoted post on the metadata signal alone', () => {
+    const r = mergeVerdict(input({ signals: promoted }))
+    expect(r.verdict.action).toBe('collapse')
+    expect(r.verdict.triggeredBy).toEqual(['sponsored'])
+  })
+
+  it('hides it WITHOUT a model — the page already said so', () => {
+    // Requiring a 4.27 GB download before hiding an advert LinkedIn has itself labelled
+    // "Promoted" would be absurd. This is the one carve-out from ADR-005.
+    const r = mergeVerdict(input({ engineState: { status: 'needs_setup' }, signals: promoted }))
+    expect(r.verdict.action).toBe('collapse')
+  })
+
+  it.each([
+    { status: 'uninitialized' },
+    { status: 'degraded', reason: 'unsupported_hardware_or_policy' },
+  ] as EngineState[])('hides with engine %j', (engineState) => {
+    expect(mergeVerdict(input({ engineState, signals: promoted })).verdict.action).toBe('collapse')
+  })
+
+  it('does NOT extend the carve-out to any other axis', () => {
+    // A metadata signal on ai_written would be a second path to collapse that bypasses the
+    // model — the exact shape ADR-005 exists to prevent.
+    const r = mergeVerdict(
+      input({ signals: [{ axis: 'ai_written', signal: { score: 100, source: 'metadata' } }] }),
+    )
+    expect(r.verdict.action).toBe('show')
+  })
+
+  it('does not let engagement_bait hide without a model either', () => {
+    const r = mergeVerdict(
+      input({ engineState: { status: 'needs_setup' }, signals: baitAt(100) }),
+    )
+    expect(r.verdict.action).toBe('show')
+    expect(r.reason).toBe('no_model')
+  })
+
+  it('still respects the allowlist', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.allowlist = ['urn:li:person:alice']
+    expect(mergeVerdict(input({ settings, signals: promoted })).verdict.action).toBe('show')
+  })
+
+  it('still respects global shadow mode', () => {
+    const settings: Settings = { ...structuredClone(DEFAULT_SETTINGS), shadowMode: true }
+    expect(mergeVerdict(input({ settings, signals: promoted })).verdict.action).toBe('show')
+  })
+
+  it('can be switched off like any other axis', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.axes.sponsored.mode = 'off'
+    expect(mergeVerdict(input({ settings, signals: promoted })).verdict.action).toBe('show')
   })
 })

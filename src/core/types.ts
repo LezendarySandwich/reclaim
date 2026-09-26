@@ -160,13 +160,18 @@ export interface Settings {
  * `engagement_bait` sits much lower at 70 because it is a different kind of judgement — the text
  * states its own intent, a user can verify a flag instantly, and being wrong is embarrassing
  * rather than defamatory.
+ *
+ * `sponsored` is enabled and works with no model at all (ADR-026): LinkedIn labels its own ads
+ * "Promoted", so there is nothing to infer. Note this is the one axis LinkedIn's User Agreement
+ * names explicitly — §8.2 prohibits "removing, covering, or obscuring an advertisement" — so it
+ * carries more terms-of-service exposure than the rest of the product combined.
  */
 export const DEFAULT_SETTINGS: Settings = {
   axes: {
     engagement_bait: { mode: 'enabled', threshold: 70 },
     ai_written: { mode: 'enabled', threshold: 90 },
     ai_image: { mode: 'off', threshold: 85 },
-    sponsored: { mode: 'off', threshold: 90 },
+    sponsored: { mode: 'enabled', threshold: 90 },
   },
   allowlist: [],
   retentionDays: 90,

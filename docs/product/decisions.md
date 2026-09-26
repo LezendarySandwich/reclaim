@@ -551,3 +551,44 @@ failure mode the literature predicts.
 **Revisit if** the dashboard's `wouldHaveHidden` history or user disagreements suggest 90 is
 mis-set. The number is a guess constrained by evidence, not a measurement — nobody has calibrated
 a rung boundary against real feed data yet.
+
+---
+
+## ADR-026 — Promoted posts are hidden, and do not require a model
+**2026-09-26 · Accepted · user decision · carves an exception to ADR-005**
+
+`sponsored` moves from `off` to `enabled`, decides on a `metadata` signal, and is the **only**
+axis that can hide with no working model.
+
+**Why the carve-out is safe here.** Every other axis is a judgement about writing, which is why
+ADR-004 keeps heuristics out of the decision and ADR-005 keeps everything behind the model gate.
+`sponsored` is not a judgement: LinkedIn renders the word "Promoted" itself. There is nothing to
+infer, nothing for a model to add, and none of the false-positive risk those decisions exist to
+contain. Requiring a 4.27 GB download before the extension will hide an advert the page has
+already labelled would be absurd.
+
+The exception is deliberately narrow, expressed as two one-element sets in `verdict.ts`:
+`METADATA_DECIDES` and `NEEDS_NO_ENGINE`. Adding an axis to either needs a new ADR. In particular
+`ai_written` must never join them — a metadata path to collapse that bypasses the model is the
+exact shape ADR-005 exists to prevent.
+
+**The one real false-positive risk, and how it is handled.** "Promoted" is also what people say
+when they get a new job. A substring match would hide *"I was promoted to Senior Engineer"* —
+among the commonest posts on LinkedIn, and about the worst mistake this extension could make. So
+the label must be a **line of its own** within the first eight lines of the post, matching a known
+label exactly. Real ads render it standalone in the actor block; promotion announcements never do.
+Three tests pin this.
+
+**Terms-of-service exposure is higher here than anywhere else in the product, and this is a
+considered acceptance rather than an oversight.** LinkedIn's User Agreement §8.2 names
+"removing, covering, or obscuring an advertisement" explicitly — it is the single roadmap item
+their terms call out by name, and the one most likely to be noticed because it touches revenue.
+The earlier research recommended shipping it opt-in and off by default.
+
+It ships on because the user asked for it on their own feed. What does not change: we still make
+zero network requests to LinkedIn (ADR-021), so there is nothing server-side to detect; the post
+is collapsed rather than removed, so the row stays in the layout; and the onboarding disclosure
+already states that LinkedIn's terms prohibit appearance-modifying extensions.
+
+**If this is ever distributed**, revisit: default it off, make enabling it an explicit choice, and
+say plainly in the listing that it filters adverts.
