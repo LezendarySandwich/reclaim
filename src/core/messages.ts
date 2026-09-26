@@ -20,6 +20,19 @@ export interface TriagedPost {
   post: Post
   heuristics: Partial<Record<Axis, number>>
   /**
+   * This post was routed `clean` and is being sent to the model ANYWAY, purely to measure how
+   * often the router is wrong.
+   *
+   * Posts the router clears never reach the model, so its one costly error — waving real slop
+   * through — leaves no trace and cannot be counted. Sampling a small share of them converts
+   * that structural blind spot into an estimate.
+   *
+   * An audit sample MUST NEVER hide a post. It is measurement, not enforcement: the user already
+   * had this post shown to them, and retroactively collapsing it because a sampling die came up
+   * differently would be indefensible.
+   */
+  audit?: boolean
+  /**
    * What the router decided. Recorded so the dashboard can show router-vs-model agreement, which
    * is the only honest version of "what detected this" — heuristics never hide, so a
    * detector breakdown would read 100% model and say nothing.

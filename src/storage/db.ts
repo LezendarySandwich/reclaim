@@ -85,6 +85,8 @@ export interface RecordVerdictInput {
   text: string
   /** What the router decided, for the agreement panel. */
   triageBand?: TriageBand
+  /** Router-audit sample — measurement traffic, kept out of the headline counts. */
+  auditSample?: boolean
   /** Epoch ms. Injected rather than read here, so callers control time and tests stay deterministic. */
   at: number
 }
@@ -116,6 +118,7 @@ export async function recordVerdict(input: RecordVerdictInput): Promise<void> {
     engineId: verdict.engineId,
     rulesVersion: verdict.rulesVersion,
     ...(input.triageBand ? { triageBand: input.triageBand } : {}),
+    ...(input.auditSample ? { auditSample: true } : {}),
     at,
   }
 
@@ -127,7 +130,9 @@ export async function recordVerdict(input: RecordVerdictInput): Promise<void> {
     // awaiting here would end the transaction before the aggregate write was queued.
     const existing = verdicts.get(cacheKey)
     existing.onsuccess = () => {
-      const alreadyCounted = existing.result !== undefined
+      // An audit sample is measurement traffic: it must not move the leaderboard, which is an
+      // accusation surface built on how often somebody is flagged.
+      const alreadyCounted = existing.result !== undefined || row.auditSample === true
       verdicts.put(row)
 
       const agg = authors.get(authorUrn)

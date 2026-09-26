@@ -43,6 +43,12 @@ export interface StoredVerdict {
    * Absent on rows written before this field existed.
    */
   triageBand?: TriageBand
+  /**
+   * This row is a router-audit sample: routed `clean`, sent to the model anyway to measure the
+   * miss rate, and never allowed to hide. Excluded from ordinary hidden/seen counts, because
+   * mixing measurement traffic into the headline numbers would distort them.
+   */
+  auditSample?: boolean
   /** Epoch ms. Passed in by the caller — this module never reads the clock, so it stays pure. */
   at: number
 }

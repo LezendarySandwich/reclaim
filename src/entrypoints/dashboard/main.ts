@@ -1,7 +1,13 @@
 import { browser } from 'wxt/browser'
 import './style.css'
 import { GATE_COPY, gateState, mayReadPosts } from '../../core/consent'
-import { grantConsent, hasConsent, loadSettings, revokeConsent } from '../../storage/settings'
+import {
+  grantConsent,
+  hasConsent,
+  loadSettings,
+  revokeConsent,
+  saveSettings,
+} from '../../storage/settings'
 import { purgeAll, putLabel } from '../../storage/db'
 import { MODELS, recommendModel } from '../../engines/registry'
 import {
@@ -11,6 +17,7 @@ import {
   loadPanelData,
   overviewPanel,
   routerPanel,
+  settingsPanel,
   thresholdPanel,
   trendPanel,
 } from './panels'
@@ -381,6 +388,11 @@ async function render(): Promise<void> {
         }
       }),
       authorsPanel(panelData),
+      settingsPanel(settings, {
+        onChange: (next) => {
+          void saveSettings(next).then(render)
+        },
+      }),
     )
   } catch (e) {
     root.append(

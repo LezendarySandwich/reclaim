@@ -10,6 +10,8 @@ import {
   since,
   thresholdView,
   withinWindow,
+  auditSamples,
+  estimateMissRate,
 } from './metrics'
 import type { StoredLabel, StoredVerdict } from './schema'
 import type { Axis, TriageBand } from '../core/types'
@@ -288,5 +290,65 @@ describe('minutesSaved', () => {
 
   it('is zero for an empty set', () => {
     expect(minutesSaved([])).toBe(0)
+  })
+})
+
+describe('audit samples are measurement, not enforcement', () => {
+  it('are excluded from ordinary windows', () => {
+    // Including them would inflate "posts seen" with traffic the user's scrolling did not
+    // generate, distorting every rate computed from it.
+    const rows = [row(), row({ auditSample: true })]
+    expect(withinWindow(rows, NOW, 30)).toHaveLength(1)
+    expect(auditSamples(rows, NOW, 30)).toHaveLength(1)
+  })
+})
+
+describe('estimateMissRate — the previously unmeasurable number', () => {
+  const audited = (score: number) =>
+    row({ auditSample: true, signals: { engagement_bait: { score, source: 'model' } } })
+
+  it('withholds an estimate below a usable sample', () => {
+    const est = estimateMissRate([audited(90), audited(10)], THRESH)
+    expect(est.rate).toBeNull()
+    expect(est.interval).toBeNull()
+    expect(est.sampled).toBe(2)
+  })
+
+  it('estimates once there is enough', () => {
+    const rows = [
+      ...Array.from({ length: 4 }, () => audited(90)),
+      ...Array.from({ length: 36 }, () => audited(10)),
+    ]
+    const est = estimateMissRate(rows, THRESH)
+    expect(est.sampled).toBe(40)
+    expect(est.missed).toBe(4)
+    expect(est.rate).toBeCloseTo(0.1)
+  })
+
+  it('reports an interval, because a point estimate off 40 samples overclaims', () => {
+    const rows = [
+      ...Array.from({ length: 4 }, () => audited(90)),
+      ...Array.from({ length: 36 }, () => audited(10)),
+    ]
+    const { interval } = estimateMissRate(rows, THRESH)
+    expect(interval).not.toBeNull()
+    expect(interval!.low).toBeLessThan(0.1)
+    expect(interval!.high).toBeGreaterThan(0.1)
+    expect(interval!.low).toBeGreaterThanOrEqual(0)
+  })
+
+  it('handles a clean sweep without producing a nonsensical interval', () => {
+    const rows = Array.from({ length: 30 }, () => audited(5))
+    const est = estimateMissRate(rows, THRESH)
+    expect(est.rate).toBe(0)
+    expect(est.interval!.low).toBe(0)
+    expect(est.interval!.high).toBeLessThan(0.2)
+  })
+
+  it('ignores heuristic scores — the router is being measured against the MODEL', () => {
+    const rows = Array.from({ length: 30 }, () =>
+      row({ auditSample: true, signals: { engagement_bait: { score: 99, source: 'heuristic' } } }),
+    )
+    expect(estimateMissRate(rows, THRESH).missed).toBe(0)
   })
 })

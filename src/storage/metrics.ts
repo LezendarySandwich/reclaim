@@ -26,7 +26,16 @@ export function since(now: number, days: number): number {
 
 export function withinWindow(rows: readonly StoredVerdict[], now: number, days: number): StoredVerdict[] {
   const cutoff = since(now, days)
-  return rows.filter((r) => r.at >= cutoff)
+  // Audit samples are measurement traffic — posts the router cleared, sent to the model only to
+  // estimate its miss rate. Including them would inflate "posts seen" with traffic the user's
+  // scrolling did not generate and distort every rate computed from it.
+  return rows.filter((r) => r.at >= cutoff && !r.auditSample)
+}
+
+/** Audit samples only. */
+export function auditSamples(rows: readonly StoredVerdict[], now: number, days: number): StoredVerdict[] {
+  const cutoff = since(now, days)
+  return rows.filter((r) => r.at >= cutoff && r.auditSample === true)
 }
 
 // ── Overview ────────────────────────────────────────────────────────────────────────────────
@@ -367,4 +376,59 @@ export function minutesSaved(rows: readonly StoredVerdict[]): number {
     .filter((r) => r.action === 'collapse')
     .reduce((sum, r) => sum + r.excerpt.length, 0)
   return chars / CHARS_PER_WORD / WPM
+}
+
+// ── Router miss rate (the estimate for the unmeasurable) ────────────────────────────────────
+
+export interface MissRateEstimate {
+  /** Cleared posts that were sampled and sent to the model anyway. */
+  sampled: number
+  /** Of those, how many the model would have flagged. */
+  missed: number
+  /** 0-1, or null below a usable sample. */
+  rate: number | null
+  /**
+   * Wilson 95% interval. A point estimate off 40 samples invites more confidence than it earns,
+   * and the honest form of "about 8%" is "somewhere between 3% and 18%".
+   */
+  interval: { low: number; high: number } | null
+}
+
+const MIN_AUDIT_SAMPLE = 20
+
+/**
+ * Estimate how often the triage router clears a post the model would have flagged.
+ *
+ * This is the number the agreement panel previously had to declare unmeasurable. It still cannot
+ * be counted directly — a post the model never saw leaves no verdict — but sampling the cleared
+ * population makes it estimable, which is a different and much better position.
+ */
+export function estimateMissRate(
+  rows: readonly StoredVerdict[],
+  thresholds: Partial<Record<Axis, number>>,
+): MissRateEstimate {
+  const sampled = rows.length
+  const missed = rows.filter((row) =>
+    (Object.entries(row.signals) as Array<[Axis, { score: number; source: string }]>).some(
+      ([axis, s]) => s.source === 'model' && s.score >= (thresholds[axis] ?? 70),
+    ),
+  ).length
+
+  if (sampled < MIN_AUDIT_SAMPLE) return { sampled, missed, rate: null, interval: null }
+
+  const p = missed / sampled
+  // Wilson score interval — behaves sensibly near 0, which a normal approximation does not, and
+  // this proportion will usually be small.
+  const z = 1.96
+  const denom = 1 + (z * z) / sampled
+  const centre = (p + (z * z) / (2 * sampled)) / denom
+  const spread =
+    (z * Math.sqrt((p * (1 - p)) / sampled + (z * z) / (4 * sampled * sampled))) / denom
+
+  return {
+    sampled,
+    missed,
+    rate: p,
+    interval: { low: Math.max(0, centre - spread), high: Math.min(1, centre + spread) },
+  }
 }

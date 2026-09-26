@@ -81,7 +81,8 @@ describe('with a working model', () => {
       ...base(),
       engine: fakeEngine({ engagement_bait: 97 }),
     })
-    expect(out[0]!.verdict.signals.engagement_bait).toEqual({ score: 97, source: 'model' })
+    // toMatchObject, not toEqual: the signal now also carries the model's reason.
+    expect(out[0]!.verdict.signals.engagement_bait).toMatchObject({ score: 97, source: 'model' })
   })
 
   it('does not collapse on a shadow axis even at 100', async () => {
@@ -159,5 +160,76 @@ describe('batching', () => {
       { ...base(), engine },
     )
     expect(peak).toBe(1)
+  })
+})
+
+describe('verdict cache', () => {
+  it('skips inference entirely on a cache hit', async () => {
+    const judge = vi.fn()
+    const engine: ModelEngine = { ...fakeEngine({}), judge }
+    const out = await classifyBatch([triaged('a')], {
+      ...base(),
+      engine,
+      lookupCached: async () => ({
+        signals: { engagement_bait: { score: 97, source: 'model', reason: 'cached reason' } },
+      }),
+    })
+    expect(judge).not.toHaveBeenCalled()
+    expect(out[0]!.fromCache).toBe(true)
+    expect(out[0]!.verdict.action).toBe('collapse')
+    expect(out[0]!.reason).toBe('cached reason')
+  })
+
+  it('falls through to the model on a miss', async () => {
+    const out = await classifyBatch([triaged('a')], {
+      ...base(),
+      engine: fakeEngine({ engagement_bait: 97 }),
+      lookupCached: async () => null,
+    })
+    expect(out[0]!.fromCache).toBe(false)
+    expect(out[0]!.verdict.action).toBe('collapse')
+  })
+
+  it('treats a storage failure as a miss, never a classification failure', async () => {
+    const out = await classifyBatch([triaged('a')], {
+      ...base(),
+      engine: fakeEngine({ engagement_bait: 97 }),
+      lookupCached: async () => {
+        throw new Error('IndexedDB exploded')
+      },
+    })
+    expect(out[0]!.verdict.action).toBe('collapse')
+  })
+
+  it('ignores a cached row that holds only heuristic signals', async () => {
+    // A heuristic-only row is not a model verdict, so it must not stand in for one.
+    const judge = vi.fn(async () => ({
+      scores: { engagement_bait: 97 },
+      reason: 'fresh',
+      engineId: 'gemini-nano' as const,
+      elapsedMs: 1,
+    }))
+    const engine: ModelEngine = { ...fakeEngine({}), judge }
+    await classifyBatch([triaged('a')], {
+      ...base(),
+      engine,
+      lookupCached: async () => ({
+        signals: { engagement_bait: { score: 40, source: 'heuristic' } },
+      }),
+    })
+    expect(judge).toHaveBeenCalledOnce()
+  })
+})
+
+describe('the model reason reaches the verdict', () => {
+  it('is attached to the model signal', async () => {
+    const out = await classifyBatch([triaged('a')], {
+      ...base(),
+      engine: fakeEngine({ engagement_bait: 97 }),
+    })
+    // Previously computed on every call and thrown away, so the stub could only show a generic
+    // label when the model had said something specific.
+    expect(out[0]!.verdict.signals.engagement_bait?.reason).toBe('because')
+    expect(out[0]!.reason).toBe('because')
   })
 })

@@ -30,6 +30,18 @@ const ROOT_MARGIN = '1500px 0px'
 /** Posts per message. Big enough to amortise the round trip, small enough to stay responsive. */
 const BATCH_SIZE = 6
 
+/**
+ * Share of `clean`-routed posts sent to the model anyway, purely to measure the router.
+ *
+ * The router's only expensive mistake is clearing a post that should have been judged, and that
+ * mistake is invisible by construction — no verdict row exists for a post the model never saw.
+ * Sampling turns it into an estimate at a bounded cost: at 5%, a 200-post session buys ten extra
+ * inferences and, over a week, enough data to say whether the router is leaking.
+ *
+ * These samples can never hide anything; the pipeline forces them to `show`.
+ */
+const AUDIT_SAMPLE_RATE = 0.05
+
 export interface WatcherDeps {
   adapter: SiteAdapter
   /** Sends a batch for classification. Returns verdicts, or rejects. */
@@ -39,6 +51,10 @@ export interface WatcherDeps {
   /** Surfaces adapter health so "selectors broke" is distinguishable from "no model". */
   onHealth?: (health: ReturnType<SiteAdapter['health']>) => void
   document?: Document
+  /** Injectable for tests. Returns 0-1. */
+  random?: () => number
+  /** Override the audit sampling rate; 0 disables it entirely. */
+  auditRate?: number
 }
 
 type PostState = 'pending' | 'queued' | 'done'
@@ -187,7 +203,14 @@ export class FeedWatcher {
           // Ad copy is often perfectly well written and routes `clean`, and the sponsored axis
           // decides on the page's own label rather than on the text — so skipping here would
           // mean never hiding an advert whose wording happens to be good.
-          if (!extracted.post.isPromoted && !needsModel(triage.band)) {
+          const mustClassify = extracted.post.isPromoted || needsModel(triage.band)
+
+          // Sample a slice of the cleared posts so the router's invisible error becomes countable.
+          const auditRate = this.#deps.auditRate ?? AUDIT_SAMPLE_RATE
+          const rnd = this.#deps.random ?? Math.random
+          const audit = !mustClassify && auditRate > 0 && rnd() < auditRate
+
+          if (!mustClassify && !audit) {
             // Cheap and confident: the model never needs to see this.
             this.#state.set(id, 'done')
             continue
@@ -200,6 +223,7 @@ export class FeedWatcher {
               ai_written: Math.round(triage.ai * 100),
             },
             band: triage.band,
+            ...(audit ? { audit: true } : {}),
           })
         }
 

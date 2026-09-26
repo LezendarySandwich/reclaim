@@ -3,11 +3,13 @@ import { errorResponse, isRequestFor } from '../core/messages'
 import type { Response } from '../core/messages'
 import { gateState, mayReadPosts } from '../core/consent'
 import { hasConsent, loadSettings } from '../storage/settings'
-import { purgeOlderThan, recordVerdict } from '../storage/db'
+import { getVerdict, purgeOlderThan, recordVerdict } from '../storage/db'
 import { InferenceScheduler, classifyBatch } from '../core/pipeline'
+import type { ModelResult } from '../core/pipeline'
 import { GeminiNanoEngine } from '../engines/gemini-nano'
 import { PROMPT_VERSION } from '../engines/prompt'
 import { RULES_VERSION } from '../detect/triage'
+import type { CachedVerdict } from '../core/pipeline'
 import type { Axis, EngineState } from '../core/types'
 
 /**
@@ -45,7 +47,7 @@ const LINKEDIN_FEED_MATCH = 'https://www.linkedin.com/feed/*'
  * remaining argument for hosting the model in an offscreen document after all (brief risk A2).
  */
 const engine = new GeminiNanoEngine()
-const scheduler = new InferenceScheduler<Partial<Record<Axis, number>>>()
+const scheduler = new InferenceScheduler<ModelResult>()
 
 let engineState: EngineState = { status: 'uninitialized' }
 
@@ -207,6 +209,12 @@ export default defineBackground(() => {
               // One scheduler for the whole worker, not one per batch: backpressure is only
               // meaningful if it spans every tab and every message.
               scheduler,
+              // Scrolling back over a post should not re-run a 4GB model on text it has already
+              // judged under the same rules.
+              lookupCached: async (cacheKey) => {
+                const row = await getVerdict(cacheKey)
+                return row ? { signals: row.signals as CachedVerdict['signals'] } : null
+              },
             })
 
             // Respond first, persist after. The content script is waiting to render, and a
@@ -223,6 +231,7 @@ export default defineBackground(() => {
                   authorName: c.source.post.authorName,
                   text: c.source.post.text,
                   triageBand: c.source.band,
+                  ...(c.source.audit ? { auditSample: true } : {}),
                   at,
                 }),
               ),

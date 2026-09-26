@@ -8,8 +8,10 @@
 import { allAuthors, labelsForAxis, recentVerdicts } from '../../storage/db'
 import { rankOffenders } from '../../storage/aggregates'
 import {
+  auditSamples,
   byAxis,
   dailySeries,
+  estimateMissRate,
   feedbackByAxis,
   hasPlottableTrend,
   minutesSaved,
@@ -210,16 +212,41 @@ export function routerPanel(data: PanelData, settings: Settings): HTMLElement {
   )
   section.append(grid)
 
-  section.append(
-    el('p', {
-      className: 'fineprint',
-      textContent:
-        'A fast pattern check runs on every post and decides which are worth sending to the ' +
-        'model; it never hides anything on its own. Posts it judged obviously fine were never ' +
-        'sent, so if it waved something through by mistake, that mistake does not appear ' +
-        'here — and cannot be counted. These figures cover only the posts the model actually saw.',
-    }),
-  )
+  // The miss estimate. Sampling a slice of cleared posts turns the router's invisible error
+  // into an estimable one — the caveat below changes shape entirely once data exists.
+  const est = estimateMissRate(auditSamples(data.rows, data.now, 30), thresholdsOf(settings))
+
+  if (est.rate !== null && est.interval) {
+    section.append(
+      el('div', { className: 'stats' }, [
+        stat(pct(est.rate), 'of cleared posts were missed'),
+        stat(`${est.missed}/${est.sampled}`, 'audit sample'),
+      ]),
+      el('p', {
+        className: 'fineprint',
+        textContent:
+          `A fast pattern check clears most posts without sending them to the model. Those ` +
+          `decisions leave no record, so ${est.sampled} of them were sampled and judged anyway ` +
+          `purely to measure. The model disagreed with ${est.missed} — an estimated miss rate of ` +
+          `${pct(est.rate)}, somewhere between ${pct(est.interval.low)} and ` +
+          `${pct(est.interval.high)} at 95% confidence. Sampled posts are never hidden.`,
+      }),
+    )
+  } else {
+    section.append(
+      el('p', {
+        className: 'fineprint',
+        textContent:
+          'A fast pattern check runs on every post and decides which are worth sending to the ' +
+          'model; it never hides anything on its own. Posts it clears are not judged, so a ' +
+          'mistake there leaves no record. A small share of cleared posts is now sampled and sent ' +
+          'to the model anyway to estimate how often that happens — ' +
+          (est.sampled === 0
+            ? 'no samples collected yet.'
+            : `${est.sampled} collected so far, not yet enough to quote a figure.`),
+      }),
+    )
+  }
   return section
 }
 
@@ -529,5 +556,174 @@ export function thresholdPanel(data: PanelData, settings: Settings): HTMLElement
       }),
     )
   }
+  return section
+}
+
+// ── Settings ────────────────────────────────────────────────────────────────────────────────
+
+/** Ladder rung boundaries, so a threshold reads as a decision rather than a number. */
+const RUNG_AT: Array<{ at: number; name: string }> = [
+  { at: 0, name: 'anything' },
+  { at: 15, name: 'a slight hint' },
+  { at: 38, name: 'some markers' },
+  { at: 65, name: 'clearly so' },
+  { at: 85, name: 'heavily so' },
+  { at: 97, name: 'almost nothing but' },
+]
+
+/**
+ * Translate a threshold into the rung it actually admits.
+ *
+ * A bare "90" means nothing to a reader. The model answers on a six-rung ladder, so the honest
+ * statement is which rung the setting lets through — "only posts the model calls almost nothing
+ * but this".
+ */
+function describeThreshold(t: number): string {
+  const admitted = RUNG_AT.filter((r) => r.at >= t)
+  if (admitted.length === 0) return 'nothing will ever cross this'
+  if (admitted.length === RUNG_AT.length) return 'hides essentially everything scored'
+  return `hides posts the model calls "${admitted[0]!.name}" or stronger`
+}
+
+export interface SettingsHandlers {
+  onChange: (next: Settings) => void
+}
+
+export function settingsPanel(settings: Settings, handlers: SettingsHandlers): HTMLElement {
+  const section = el('section')
+  section.append(el('h2', { textContent: 'Settings' }))
+
+  for (const axis of ALL_AXES) {
+    const setting = settings.axes[axis]
+    const row = el('div', { className: 'setting' })
+
+    const head = el('div', { className: 'setting-head' }, [
+      el('span', { className: 'model-name', textContent: AXIS_LABEL[axis] }),
+    ])
+
+    const modeSelect = el('select')
+    for (const [value, label] of [
+      ['enabled', 'Hide these'],
+      ['shadow', 'Measure only'],
+      ['off', 'Ignore'],
+    ] as const) {
+      const opt = el('option', { value, textContent: label })
+      if (setting.mode === value) opt.selected = true
+      modeSelect.append(opt)
+    }
+    modeSelect.setAttribute('aria-label', `What to do with ${AXIS_LABEL[axis]}`)
+    modeSelect.addEventListener('change', () => {
+      const next = structuredClone(settings)
+      next.axes[axis].mode = modeSelect.value as Settings['axes'][Axis]['mode']
+      handlers.onChange(next)
+    })
+    head.append(modeSelect)
+    row.append(head)
+
+    if (setting.mode === 'enabled') {
+      const slider = el('input', { type: 'range', min: '30', max: '97', step: '1' })
+      slider.value = String(setting.threshold)
+      slider.setAttribute('aria-label', `Confidence needed to hide ${AXIS_LABEL[axis]}`)
+
+      const readout = el('div', {
+        className: 'muted',
+        textContent: `${setting.threshold} — ${describeThreshold(setting.threshold)}`,
+      })
+      // Live-update the label while dragging, but only persist on release — writing settings on
+      // every pixel of a drag would thrash storage and re-render the page mid-gesture.
+      slider.addEventListener('input', () => {
+        readout.textContent = `${slider.value} — ${describeThreshold(Number(slider.value))}`
+      })
+      slider.addEventListener('change', () => {
+        const next = structuredClone(settings)
+        next.axes[axis].threshold = Number(slider.value)
+        handlers.onChange(next)
+      })
+      row.append(slider, readout)
+
+      if (axis === 'ai_written' && setting.threshold < 85) {
+        row.append(
+          el('p', {
+            className: 'fineprint',
+            textContent:
+              'Below "heavily so", this axis starts hiding posts on a judgement the research does ' +
+              'not support at post length. Published detectors score near chance on short text, and ' +
+              'the measured false positives fall hardest on people writing in a second language. ' +
+              'Lower it if your own numbers justify it, not on principle.',
+          }),
+        )
+      }
+    }
+    section.append(row)
+  }
+
+  // Allowlist -------------------------------------------------------------------------------
+  const allow = el('div', { className: 'setting' })
+  allow.append(el('div', { className: 'setting-head' }, [el('span', { className: 'model-name', textContent: 'Never hide' })]))
+
+  if (settings.allowlist.length === 0) {
+    allow.append(el('p', { className: 'muted', textContent: 'Nobody yet. Add people from a collapsed post.' }))
+  } else {
+    const list = el('ul', { className: 'allowlist' })
+    for (const urn of settings.allowlist) {
+      const remove = el('button', { textContent: 'Remove' })
+      remove.addEventListener('click', () => {
+        const next = structuredClone(settings)
+        next.allowlist = next.allowlist.filter((u) => u !== urn)
+        handlers.onChange(next)
+      })
+      list.append(el('li', {}, [el('span', { textContent: urn }), remove]))
+    }
+    allow.append(list)
+  }
+  section.append(allow)
+
+  // Retention -------------------------------------------------------------------------------
+  const retention = el('div', { className: 'setting' })
+  const days = el('select')
+  for (const value of [7, 30, 90, 180]) {
+    const opt = el('option', { value: String(value), textContent: `${value} days` })
+    if (settings.retentionDays === value) opt.selected = true
+    days.append(opt)
+  }
+  days.setAttribute('aria-label', 'How long to keep post history')
+  days.addEventListener('change', () => {
+    const next = structuredClone(settings)
+    next.retentionDays = Number(days.value)
+    handlers.onChange(next)
+  })
+  retention.append(
+    el('div', { className: 'setting-head' }, [
+      el('span', { className: 'model-name', textContent: 'Keep history for' }),
+      days,
+    ]),
+    el('p', {
+      className: 'muted',
+      textContent: 'Excerpts of other people’s posts, stored on this device only. Shorter is kinder.',
+    }),
+  )
+  section.append(retention)
+
+  // Global pause ----------------------------------------------------------------------------
+  const pause = el('div', { className: 'setting' })
+  const toggle = el('button', {
+    textContent: settings.shadowMode ? 'Resume hiding' : 'Pause hiding (keep measuring)',
+  })
+  toggle.addEventListener('click', () => {
+    const next = structuredClone(settings)
+    next.shadowMode = !next.shadowMode
+    handlers.onChange(next)
+  })
+  pause.append(
+    el('div', { className: 'actions' }, [toggle]),
+    el('p', {
+      className: 'muted',
+      textContent: settings.shadowMode
+        ? 'Paused. Posts are still being scored so the dashboard keeps filling, but nothing is hidden.'
+        : 'Pausing keeps scoring and recording, so you can watch what it would do without it doing it.',
+    }),
+  )
+  section.append(pause)
+
   return section
 }
