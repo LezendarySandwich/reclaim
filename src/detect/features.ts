@@ -87,6 +87,8 @@ export interface Features {
   timeContrast: number
   /** High: "Here's what I learned:", "I'll go first", fake-humility openers. */
   humbleOpener: number
+  /** High: "Follow me for more…" — using the post as an advert for the account. */
+  followBait: number
 }
 
 export const EMPTY_FEATURES: Features = {
@@ -111,6 +113,7 @@ export const EMPTY_FEATURES: Features = {
   commentGate: 0,
   timeContrast: 0,
   humbleOpener: 0,
+  followBait: 0,
 }
 
 const HEDGES =
@@ -182,9 +185,34 @@ const COMMENT_GATE =
 // a post that ends by asking you something is fishing for a comment, whatever the wording.
 const QUESTION_CLOSER = /\?\s*$/u
 
-// `Term: description` — a label of a few words, a colon, then prose. Requires the label to be
-// short and the description to be substantial, so ordinary prose containing a colon does not fire.
-const LABELLED_LINE = /^\s*[\p{L}\p{N}][\p{L}\p{N} '’&/()-]{1,28}:\s+\S{8,}/u
+/**
+ * `Term: value` — a short label, a colon, then content.
+ *
+ * Two bugs preceded this version, both found on a real job-spam post that scored 0.00 here
+ * despite being nothing but labelled lines:
+ *
+ *   1. It required the line to START with a letter or digit, so every emoji-prefixed label
+ *      missed — and `💻 Role:` / `🏢 Company:` / `📍 Location:` is the commonest form of this
+ *      shape on LinkedIn, not an edge case.
+ *   2. It required the value to be 8+ characters, so `Company: Apple` missed on length alone.
+ *
+ * Now an optional leading glyph is allowed, and the value only has to be non-trivial.
+ */
+const LABELLED_LINE = new RegExp(
+  String.raw`^\s*(?:[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{1F900}-\u{1F9FF}]\u{FE0F}?\s*|[•·▪‣◦*+\u{2192}-]\s*)?` +
+    String.raw`[\p{L}\p{N}][\p{L}\p{N} '’&/()-]{1,28}:\s+\S{2,}`,
+  'u',
+)
+
+/**
+ * "Follow me for more X" — asking for a follow in exchange for nothing.
+ *
+ * Distinct from a comment gate and from a closing question: it is not soliciting engagement with
+ * the post, it is using the post as an advert for the account. Extremely common on job-repost
+ * and "value" accounts, and a strong standalone signal.
+ */
+const FOLLOW_BAIT =
+  /\b(?:follow|connect with)\s+(?:me|us|[\p{Lu}][\p{L}'’-]+(?:\s+[\p{Lu}][\p{L}'’-]+){0,2})\s+(?:for|to\s+get|and\s+get)\b/iu
 
 // Any bullet glyph, not just emoji.
 const BULLET_LINE = /^\s*(?:[•·▪‣◦‧∙*+]|[-–—]\s|→|➡|›|»)\s*\S/u
@@ -300,5 +328,6 @@ export function extractFeatures(text: string): Features {
     commentGate: count(text, COMMENT_GATE) > 0 ? 1 : 0,
     timeContrast: TIME_CONTRAST.test(text) ? 1 : 0,
     humbleOpener: HUMBLE_OPENER.test(text) ? 1 : 0,
+    followBait: FOLLOW_BAIT.test(text) ? 1 : 0,
   }
 }

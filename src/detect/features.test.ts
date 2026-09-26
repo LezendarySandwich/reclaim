@@ -248,3 +248,53 @@ describe('concreteness does not treat digit soup as substance', () => {
     expect(reallySpecific.concreteness).toBeGreaterThan(digitSoup.concreteness)
   })
 })
+
+describe('emoji-prefixed labels (a real missed job-spam post)', () => {
+  it('detects a label listicle whose lines start with emoji', () => {
+    // The commonest form of this shape on LinkedIn, and it scored 0.00 because the regex
+    // required lines to start with a letter.
+    const f = extractFeatures(
+      '💻 Role: Software Engineer\n🏢 Company: Apple\n📍 Location: Bengaluru, India',
+    )
+    expect(f.labelledListicle).toBeGreaterThan(0.5)
+  })
+
+  it('detects short values like "Company: Apple"', () => {
+    // The second half of the same bug: values had to be 8+ characters.
+    const f = extractFeatures('Role: Engineer\nCompany: Apple\nLocation: Pune')
+    expect(f.labelledListicle).toBeGreaterThan(0.5)
+  })
+
+  it('detects bullet-prefixed labels too', () => {
+    const f = extractFeatures('• Role: Engineer\n• Company: Apple\n• Location: Pune')
+    expect(f.labelledListicle).toBeGreaterThan(0.5)
+  })
+
+  it('still does not fire on ordinary prose with a colon', () => {
+    expect(
+      extractFeatures(
+        'We shipped it on Tuesday: the migration took three weeks and went fine overall. ' +
+          'The hard part was the data rather than the code, as it usually is.',
+      ).labelledListicle,
+    ).toBe(0)
+  })
+})
+
+describe('followBait', () => {
+  it.each([
+    '👉 Follow Sahil Hans for more job updates, hiring alerts & career opportunities.',
+    'Follow me for more content like this.',
+    'Connect with Jane Doe for daily insights.',
+    'Follow us to get weekly updates.',
+  ])('detects %s', (text) => {
+    expect(extractFeatures(text).followBait).toBe(1)
+  })
+
+  it.each([
+    'I follow a lot of people who post about distributed systems.',
+    'You should follow the migration guide before upgrading.',
+    'We had to follow up with the vendor twice.',
+  ])('does not fire on %s', (text) => {
+    expect(extractFeatures(text).followBait).toBe(0)
+  })
+})

@@ -120,3 +120,28 @@ Reported from a live feed. Measured rather than guessed, and they exposed three 
       at `blatant` (ADR-025), so a `strong` rating still leaves them visible.
 - [ ] The HTTP post's concreteness is still 1.00 — it has genuine proper nouns too. The fix
       reduced the damage rather than removing it.
+
+## Job-spam miss — 2026-09-26
+
+Reported from a live feed: an "Apple IS HIRING 🚨" post with `💻 Role:` / `🏢 Company:` /
+`📍 Location:` lines and a `👉 Follow Sahil Hans for more…` closer.
+
+**The router was not at fault** — it already returned `likely_slop` at 0.674, so the post reached
+the model and the model rated it below threshold. But measuring it exposed a separate real bug.
+
+- [x] **`labelledListicle` scored 0.00 on a post made entirely of labelled lines.** Two defects in
+      one regex: it required the line to START with a letter or digit, so every emoji-prefixed
+      label missed — and `💻 Role:` is the commonest form of this shape on LinkedIn, not an edge
+      case — and it required the value to be 8+ characters, so `Company: Apple` missed on length
+      alone. Now allows an optional leading emoji or bullet glyph and a short value.
+- [x] Added `followBait` — "Follow me for more X". Distinct from a comment gate and from a closing
+      question: it is not soliciting engagement with the post, it is using the post as an advert
+      for the account. Weighted at 0.6, near the comment gate, because both say outright what they
+      are doing.
+- [x] Measured after: job-spam 0.674 → **0.909**, listicle 0.00 → 1.00. Human writing still
+      `clean` at 0.028 and non-native still `ambiguous` at 0.429 — fairness unaffected.
+- [x] Prompt v3 adds follow-bait and repackaged job listings to the bait list, with an anchor
+      built from this exact post. The line that matters: the information may be real and freely
+      available, and what makes it bait is the template plus the ask.
+- [x] My own edit broke the build — I put backticks around "Role:" inside `SYSTEM_PROMPT`, which
+      is a template literal, terminating the string. Caught by typecheck.

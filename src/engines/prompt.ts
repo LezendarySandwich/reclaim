@@ -19,7 +19,7 @@
 import type { Axis } from '../core/types'
 
 /** Bumped when the prompt or schema changes. Feeds the verdict cache key with RULES_VERSION. */
-export const PROMPT_VERSION = 'p2-2026.09.26-listicle'
+export const PROMPT_VERSION = 'p3-2026.09.26-followbait'
 
 export const LADDER = ['none', 'slight', 'some', 'clear', 'strong', 'blatant'] as const
 export type Rung = (typeof LADDER)[number]
@@ -70,12 +70,18 @@ export const SYSTEM_PROMPT = `You rate the WRITING STYLE of social media posts. 
 
 Rate two things independently.
 
-ENGAGEMENT BAIT — writing engineered to farm reactions rather than say something:
+ENGAGEMENT BAIT — writing engineered to farm reactions or followers rather than say something:
 - asking readers to comment a keyword to receive something
+- **"Follow me for more X"** — using the post as an advert for the account. Counts even when the
+  post itself contains something useful; the useful part is the bait.
+- **repackaged job listings and news** posted as "Role:" / "Company:" / "Location:" templates
+  with a follow-me line attached. The information may be real and freely available elsewhere;
+  what makes it bait is the template plus the ask.
 - "Agree?", "Thoughts?", "Who else?" tacked on the end
 - rags-to-riches arcs ("3 years ago I was broke. Today…")
 - one-sentence-per-line hook ladders with no substance
 - fake humility or manufactured vulnerability as an opener
+- ALL-CAPS or 🚨 openers manufacturing urgency
 
 TEMPLATED — writing that reads as generic, formulaic filler:
 - **the "Term: description" listicle** — a long run of short labels each followed by a one-line
@@ -135,6 +141,13 @@ export const FEW_SHOTS: ReadonlyArray<{ post: string; response: string }> = [
   {
     post: 'Water: zero-aura npc energy. Hot Coffee: corporate-brained hustle-grindset core. Iced Tea: coastal-grandmother delusional. Red Bull: unhinged goblincore panic attack. Tea: secretly evil soft-launch villain era.',
     response: '{"bait":"some","ai":"blatant","reason":"twelve-item label listicle, no substance"}',
+  },
+  {
+    // Real, useful information — and still bait. Anchors that a genuine job link does not excuse
+    // the template-plus-follow-me packaging, which a real post exploited to score under
+    // threshold despite the router flagging it.
+    post: 'Apple IS HIRING! 🚨\n\n💻 Role: Software Engineer\n🏢 Company: Apple\n📍 Location: Bengaluru\n\n🔗 Apply Here: https://lnkd.in/x\n\n👉 Follow Jane Doe for more job updates and hiring alerts.',
+    response: '{"bait":"blatant","ai":"strong","reason":"job repost template with follow-me ask"}',
   },
 ]
 

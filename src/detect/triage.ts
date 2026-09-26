@@ -16,7 +16,7 @@ import type { TriageBand } from '../core/types'
  * Bumped whenever features or thresholds change. Load-bearing: it is part of the verdict cache
  * key (ADR-010), so bumping it invalidates every cached verdict automatically.
  */
-export const RULES_VERSION = 'triage-2026.09.26c-listicle-uncalibrated'
+export const RULES_VERSION = 'triage-2026.09.26d-followbait-uncalibrated'
 
 /**
  * Below this, every rate feature is noise — one em-dash in a twelve-word post is a rate of 8 per
@@ -46,6 +46,9 @@ export const PROVISIONAL_SLOP_ABOVE = 0.55
  */
 const BAIT_WEIGHTS: Partial<Record<keyof Features, number>> = {
   commentGate: 0.85,
+  // Near the comment gate in strength: both trade something for engagement, and both say so
+  // outright rather than needing to be inferred.
+  followBait: 0.6,
   questionCloser: 0.35,
   timeContrast: 0.3,
   humbleOpener: 0.3,
