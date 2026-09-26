@@ -103,8 +103,12 @@ describe('heuristics route but never judge (ADR-004)', () => {
 })
 
 describe('axis modes (ADR-019)', () => {
-  it('ai_written is shadow by default and never collapses, even at 100', () => {
-    const r = mergeVerdict(input({ signals: [{ axis: 'ai_written', signal: sig(100) }] }))
+  it('a shadow axis never collapses, even at 100', () => {
+    // Tests the MECHANISM, not the default. ai_written was shadow by default until ADR-025;
+    // the mode still has to work for any axis set to it.
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.axes.ai_written.mode = 'shadow'
+    const r = mergeVerdict(input({ settings, signals: [{ axis: 'ai_written', signal: sig(100) }] }))
     expect(r.verdict.action).toBe('show')
     expect(r.verdict.signals.ai_written?.score).toBe(100)
   })
@@ -196,8 +200,11 @@ describe('multi-axis', () => {
   })
 
   it('a shadow axis is excluded from triggeredBy even when a sibling fires', () => {
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.axes.ai_written.mode = 'shadow'
     const r = mergeVerdict(
       input({
+        settings,
         signals: [
           { axis: 'engagement_bait', signal: sig(90) },
           { axis: 'ai_written', signal: sig(100) },
@@ -254,5 +261,46 @@ describe('explain', () => {
       }),
     )
     expect(explain(r.verdict)).toBe('Looks templated · Looks like engagement bait')
+  })
+})
+
+describe('ai_written at high confidence only (ADR-025)', () => {
+  // The ladder: none=0, slight=15, some=38, clear=65, strong=85, blatant=97. A threshold of 90
+  // means exactly one rung qualifies, and "strong" deliberately does not.
+  it('hides on blatant', () => {
+    const r = mergeVerdict(input({ signals: [{ axis: 'ai_written', signal: sig(97) }] }))
+    expect(r.verdict.action).toBe('collapse')
+    expect(r.verdict.triggeredBy).toEqual(['ai_written'])
+  })
+
+  it('does NOT hide on strong — one rung is the entire safety margin', () => {
+    const r = mergeVerdict(input({ signals: [{ axis: 'ai_written', signal: sig(85) }] }))
+    expect(r.verdict.action).toBe('show')
+  })
+
+  it.each([0, 15, 38, 65, 85])('does not hide at rung score %i', (score) => {
+    expect(
+      mergeVerdict(input({ signals: [{ axis: 'ai_written', signal: sig(score) }] })).verdict.action,
+    ).toBe('show')
+  })
+
+  it('still refuses a heuristic signal however high', () => {
+    // ADR-004 is unaffected by enabling the axis: regex-grade rules for AI authorship are a
+    // proxy for "non-native or formal writer", which is the whole reason they may never hide.
+    const r = mergeVerdict(input({ signals: [{ axis: 'ai_written', signal: sig(100, 'heuristic') }] }))
+    expect(r.verdict.action).toBe('show')
+  })
+
+  it('still fails open with no model', () => {
+    const r = mergeVerdict(
+      input({ engineState: { status: 'needs_setup' }, signals: [{ axis: 'ai_written', signal: sig(97) }] }),
+    )
+    expect(r.verdict.action).toBe('show')
+  })
+
+  it('is far stricter than engagement_bait, which hides from 70', () => {
+    expect(DEFAULT_SETTINGS.axes.ai_written.threshold).toBeGreaterThan(
+      DEFAULT_SETTINGS.axes.engagement_bait.threshold,
+    )
   })
 })

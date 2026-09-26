@@ -16,7 +16,7 @@ import type { TriageBand } from '../core/types'
  * Bumped whenever features or thresholds change. Load-bearing: it is part of the verdict cache
  * key (ADR-010), so bumping it invalidates every cached verdict automatically.
  */
-export const RULES_VERSION = 'triage-2026.09.26-uncalibrated'
+export const RULES_VERSION = 'triage-2026.09.26b-noisy-or-uncalibrated'
 
 /**
  * Below this, every rate feature is noise — one em-dash in a twelve-word post is a rate of 8 per
@@ -86,19 +86,33 @@ const AI_WEIGHTS: Partial<Record<keyof Features, number>> = {
 /** Concrete, specific writing is the strongest counter-signal we have. */
 const CONCRETENESS_DISCOUNT = 0.3
 
-function weightedScore(
+/**
+ * Combine signals as independent evidence, not as a weighted average.
+ *
+ * Noisy-OR: `1 - Π(1 - wᵢvᵢ)`. Each signal gets a chance to raise the score on its own, and a
+ * single near-certain marker is enough.
+ *
+ * The first version divided by the SUM of all weights, which was a modelling error rather than a
+ * tuning problem. `BAIT_WEIGHTS` sums to ~2.95, so a post firing only `commentGate` — the
+ * strongest single signal at 0.85 — scored 0.85/2.95 ≈ 0.29, and a post had to fire most markers
+ * simultaneously to score highly. In practice nothing ever reached `likely_slop` on a real feed:
+ * the band was dead and the agreement panel read 0 in both of its rows.
+ *
+ * These markers are genuinely independent — "comment GUIDE below" is bait whether or not the post
+ * also has emoji bullets — so treating them as competing components of an average was simply the
+ * wrong shape.
+ */
+function combineEvidence(
   features: Features,
   weights: Partial<Record<keyof Features, number>>,
 ): number {
-  let total = 0
-  let max = 0
+  let survive = 1
   for (const [key, weight] of Object.entries(weights) as [keyof Features, number][]) {
     const value = features[key]
-    if (typeof value !== 'number') continue
-    total += value * weight
-    max += weight
+    if (typeof value !== 'number' || value <= 0) continue
+    survive *= 1 - Math.min(1, Math.max(0, value * weight))
   }
-  return max > 0 ? Math.min(1, total / max) : 0
+  return Math.min(1, 1 - survive)
 }
 
 export interface TriageResult {
@@ -126,8 +140,8 @@ export function route(text: string): TriageResult {
     return { band: 'ambiguous', score: 0, bait: 0, ai: 0, features, shortCircuited: true }
   }
 
-  const rawBait = weightedScore(features, BAIT_WEIGHTS)
-  const rawAi = weightedScore(features, AI_WEIGHTS)
+  const rawBait = combineEvidence(features, BAIT_WEIGHTS)
+  const rawAi = combineEvidence(features, AI_WEIGHTS)
 
   // Concreteness discounts the AI side only. A bait post full of real numbers is still bait —
   // "I made £47,000 in 3 months, comment MONEY for the playbook" should not be discounted.

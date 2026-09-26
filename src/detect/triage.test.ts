@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MIN_WORDS, RULES_VERSION, needsModel, route } from './triage'
+import { MIN_WORDS, PROVISIONAL_SLOP_ABOVE, RULES_VERSION, needsModel, route } from './triage'
 
 /**
  * Corpus note: these are hand-written samples, not a measured dataset. They pin BEHAVIOUR we have
@@ -189,5 +189,47 @@ describe('performance', () => {
 describe('RULES_VERSION', () => {
   it('is exported and marked uncalibrated', () => {
     expect(RULES_VERSION).toContain('uncalibrated')
+  })
+})
+
+describe('likely_slop must be reachable (regression)', () => {
+  // This band was DEAD for a whole release. The scoring function divided by the sum of all
+  // weights, so a post firing only `commentGate` — the strongest single marker at 0.85 — scored
+  // 0.85/2.95 ≈ 0.29, and nothing on a real feed ever crossed 0.55. The agreement panel showed
+  // zero in both of its likely_slop rows, which is how it was noticed. Nothing in the test suite
+  // caught it, because no test asserted the band was reachable at all.
+
+  // All at least MIN_WORDS long. Two earlier fixtures here were 21 and 23 words and therefore
+  // short-circuited to `ambiguous` with score 0 — they were testing the length guard, not the
+  // scoring, and failed for a reason that had nothing to do with what they claimed to check.
+  const CLEAR_BAIT = [
+    'Comment "GUIDE" below and I will send you the playbook. It took me six months to write and I am giving it away free today only, so do not miss out.',
+    'I was rejected from 47 different jobs over eighteen months.\n\nToday I run a seven figure agency with a team of twelve people.\n\nHere\'s what I learned along the way:\n\nMost people give up far too early.\n\nSuccess is just failure that kept on going.\n\nAgree?',
+    '🚀 5 lessons from scaling to ten thousand users\n\n💡 Listen to your customers every single day\n\n✅ Ship fast and iterate constantly\n\n🔥 Hire slowly and fire quickly\n\n📈 Measure everything that actually matters\n\nWhich of these resonates most with you?',
+  ]
+
+  it.each(CLEAR_BAIT.map((t, i) => [i, t] as const))(
+    'unambiguous bait %i reaches likely_slop',
+    (_i, text) => {
+      expect(route(text).band).toBe('likely_slop')
+    },
+  )
+
+  it('a single decisive marker is enough — signals are independent evidence', () => {
+    // The modelling point: a comment-gated lead magnet is bait whether or not it also has emoji
+    // bullets. Averaging across markers made one strong signal look weak.
+    const onlyCommentGate =
+      'Comment "GUIDE" below and I will send you the playbook. ' +
+      'It is a straightforward document about a normal professional subject with no other markers at all.'
+    expect(route(onlyCommentGate).bait).toBeGreaterThan(PROVISIONAL_SLOP_ABOVE)
+  })
+
+  it('and the fairness guarantee still holds under the new combination', () => {
+    // The risk of making signals combine more readily is that innocuous writing starts firing.
+    const nonNative =
+      'In my previous company I was responsible for managing the team of five developers. ' +
+      'We have delivered the project on time despite of many challenges. I believe that good ' +
+      'communication is the key for success in any team. Currently I am open for new challenges.'
+    expect(route(nonNative).band).not.toBe('likely_slop')
   })
 })

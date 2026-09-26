@@ -147,14 +147,24 @@ export interface Settings {
 }
 
 /**
- * v1 defaults. `engagement_bait` is the only axis that may hide (ADR-019): the text states its own
- * intent, a user can verify a flag instantly, and a false positive is embarrassing rather than
- * defamatory.
+ * v1 defaults.
+ *
+ * `ai_written` is enabled but at a deliberately extreme threshold (ADR-025). The model answers on
+ * a six-rung ladder mapped to none=0, slight=15, some=38, clear=65, strong=85, blatant=97 — so a
+ * threshold of 90 means **only `blatant` hides**. "Strong" is not enough.
+ *
+ * That is the narrowest possible reading of "high confidence", and it is narrow on purpose: at
+ * post length, published detectors score near chance, and the measured false positives fall
+ * hardest on people writing in a second language. One rung is the whole safety margin.
+ *
+ * `engagement_bait` sits much lower at 70 because it is a different kind of judgement — the text
+ * states its own intent, a user can verify a flag instantly, and being wrong is embarrassing
+ * rather than defamatory.
  */
 export const DEFAULT_SETTINGS: Settings = {
   axes: {
     engagement_bait: { mode: 'enabled', threshold: 70 },
-    ai_written: { mode: 'shadow', threshold: 80 },
+    ai_written: { mode: 'enabled', threshold: 90 },
     ai_image: { mode: 'off', threshold: 85 },
     sponsored: { mode: 'off', threshold: 90 },
   },

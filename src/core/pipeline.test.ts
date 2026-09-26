@@ -85,8 +85,13 @@ describe('with a working model', () => {
   })
 
   it('does not collapse on a shadow axis even at 100', async () => {
+    // Tests the mechanism rather than the default — ai_written became `enabled` in ADR-025, but
+    // shadow mode still has to work for whichever axis is set to it.
+    const settings = structuredClone(DEFAULT_SETTINGS)
+    settings.axes.ai_written.mode = 'shadow'
     const out = await classifyBatch([triaged('a')], {
       ...base(),
+      settings,
       engine: fakeEngine({ ai_written: 100 }),
     })
     expect(out[0]!.verdict.action).toBe('show')

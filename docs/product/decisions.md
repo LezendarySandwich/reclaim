@@ -520,3 +520,34 @@ twice.
 extension service worker on Chrome 153 while availability was `"downloadable"`. The research said
 extensions retain legacy sampling params; that may still be true and params may simply be
 unknowable before download. Rather than resolve it from outside, the code is correct either way.
+
+---
+
+## ADR-025 — `ai_written` hides, but only at the top rung
+**2026-09-26 · Accepted · amends ADR-019 · user decision**
+
+`ai_written` moves from `shadow` to `enabled` with a threshold of **90**.
+
+The model answers on a six-rung ladder mapped to `none=0, slight=15, some=38, clear=65,
+strong=85, blatant=97`. A threshold of 90 means **only `blatant` hides** — "strong" is not
+enough. That is the narrowest possible reading of "high confidence", and it is narrow on purpose.
+
+**Why not lower.** ADR-019's evidence has not changed: at post length published detectors score
+AUC 0.16–0.73, prompted frontier models manage 0.53–0.73 against a 0.50 baseline, and Liang et al.
+measured a 61.22% false-positive rate on non-native English writers. LinkedIn is the most
+formal-register platform there is. One rung is the entire safety margin between this and the
+failure mode the literature predicts.
+
+**What this does NOT change:**
+
+- **Heuristics still may never hide on this axis** (ADR-004). Regex-grade rules for AI authorship
+  are a proxy for "non-native or formal writer"; enabling the axis does not enable them.
+- **Thumbs on `ai_written` remain an annoyance label, not a tuning signal** (ADR-019 point 8). A
+  25M-comment study found human AI-accusations uncorrelated with the statistical signal, so
+  auto-tuning on them would train a "posts I find annoying" classifier and mislabel its output.
+- **The stub still says "Looks templated"**, never "AI-written", and still renders no score. We
+  are describing how text reads, not making a provenance claim about a person.
+
+**Revisit if** the dashboard's `wouldHaveHidden` history or user disagreements suggest 90 is
+mis-set. The number is a guess constrained by evidence, not a measurement — nobody has calibrated
+a rung boundary against real feed data yet.

@@ -66,3 +66,22 @@ _Append here. Strike through with a reason rather than deleting._
       so penalising it broadly would be another demographic proxy. What discriminates is *which*
       emoji, not *whether*. Measured: an emoji listicle scores 0.310 and a 👉-bulleted post 0.325,
       while a human post containing 😅 stays at 0.052 and routes `clean`.
+
+- [x] **`likely_slop` was DEAD in production** and nothing caught it. Spotted from the dashboard's
+      agreement panel reading 0 in both of its likely_slop rows on real data.
+      Cause was a modelling error, not a threshold that needed nudging: `weightedScore` divided by
+      the SUM of all weights, and `BAIT_WEIGHTS` sums to ~2.95 — so a post firing only
+      `commentGate` (the strongest single marker, 0.85) scored 0.29, and a post had to fire most
+      markers simultaneously to score highly. These markers are independent evidence, not
+      competing components of an average.
+      Replaced with noisy-OR: `1 - Π(1 - wᵢvᵢ)`. Measured after the change — clean human 0.03-0.10,
+      non-native English 0.18-0.39, real bait 0.65-0.98. The fairness guarantee holds and the
+      separation is much cleaner.
+      Two regression tests added: unambiguous bait must reach `likely_slop`, and a single decisive
+      marker must be enough on its own.
+- [x] Two of those new regression fixtures initially failed at 21 and 23 words — below `MIN_WORDS`,
+      so they short-circuited and were testing the length guard rather than the scoring. Lengthened
+      to realistic posts.
+- [ ] Non-native writing moved from `clean` to `ambiguous` under the new combination, so it now
+      reaches the model more often. Safe direction — the model judges, not the router — but it is
+      a small unmeasured increase in inference cost.
