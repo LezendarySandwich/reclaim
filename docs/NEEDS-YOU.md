@@ -17,7 +17,7 @@ It's read-only, no extension involved, no server. Nothing like the mess S2 turne
 2. DevTools console
 3. Paste `scripts/spikes/linkedin-dom-audit.js` (it's on your clipboard from earlier)
 4. Run `await linkedinDomAudit()`
-5. Paste me the JSON, or save it to `docs/features/005-linkedin-adapter/s4-results.json`
+5. Paste me the JSON, or save it to `docs/features/006-linkedin-adapter/s4-results.json`
 
 Takes ~20s — it scrolls the feed to test whether LinkedIn recycles DOM nodes.
 
@@ -104,7 +104,9 @@ plainly in onboarding rather than bury it.
 **ADR-020 — consent gate before any post text is read.** The Chrome Web Store user-data policy
 changed in July 2026 and deleted the exemption we'd have relied on. This forces a real code change:
 dynamic content-script registration after consent, and the LinkedIn host permission requested
-during onboarding rather than at install. **Not yet implemented** — see below.
+during onboarding rather than at install. **Implemented** — but nothing can *grant* consent until
+the onboarding UI exists, so the extension is currently inert by construction. That is correct
+behaviour, not a bug.
 
 ---
 
