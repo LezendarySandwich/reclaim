@@ -234,3 +234,16 @@ on a surface whose whole purpose is to say "this person posts a lot of slop".
       and which one should own the post is a product question nobody has answered.
 - [ ] Any leaderboard rows already written under a wrong author are still wrong. There is no
       migration, and the 90-day retention will eventually age them out.
+
+## Ads still not hiding, and two scheduling questions — 2026-09-26
+
+- [x] **`queryAll` is first-selector-wins, and that silently hid a whole category of post.**
+      The post chain is `FeedType_MAIN_FEED` → `FeedType_` → `[role="listitem"]`. If ordinary
+      posts match the first selector and sponsored posts only match a later one, first-wins
+      returns the ordinary posts and **every ad is invisible to the entire pipeline** — never
+      extracted, never classified, never hideable. Demonstrated in a fixture.
+      `findPosts` now takes the UNION of the chain and filters structurally with `looksLikePost`
+      (has an author link, or a body container, or is a lazy-mount slot). Filtering on structure
+      is more honest than relying on selector precedence anyway.
+      `queryAll`/`queryFirst` keep first-wins, which is correct for a FIELD — there you do want
+      the best available selector for one value.

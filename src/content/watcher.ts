@@ -27,6 +27,21 @@ import type { TriagedPost } from '../core/messages'
 /** How far outside the viewport to start work. Prior-art value; not independently tuned. */
 const ROOT_MARGIN = '1500px 0px'
 
+/**
+ * Distance from the viewport in screen-heights. 0 means on screen.
+ *
+ * One `getBoundingClientRect` per post per batch — a layout read, so not free, but it happens
+ * once per classification rather than per frame. Worth it: without a real measurement the
+ * scheduler cannot tell a post about to appear from one scrolled past ten screens ago.
+ */
+function distanceOf(el: Element): number {
+  const rect = el.getBoundingClientRect()
+  const h = window.innerHeight || 1
+  if (rect.bottom < 0) return Math.abs(rect.bottom) / h // above the viewport, already passed
+  if (rect.top > h) return (rect.top - h) / h // below, approaching
+  return 0
+}
+
 /** Posts per message. Big enough to amortise the round trip, small enough to stay responsive. */
 const BATCH_SIZE = 6
 
@@ -57,7 +72,7 @@ export interface WatcherDeps {
   auditRate?: number
 }
 
-type PostState = 'pending' | 'queued' | 'done'
+type PostState = 'triaged' | 'queued' | 'done'
 
 export class FeedWatcher {
   readonly #deps: WatcherDeps
@@ -74,6 +89,10 @@ export class FeedWatcher {
    * rendered "this author" for posts whose author extraction had already identified.
    */
   readonly #authors = new Map<string, string>()
+  /** Router result per post, computed at scan time so the model call carries no triage latency. */
+  readonly #triage = new Map<string, ReturnType<typeof route>>()
+  /** Posts selected as router-audit samples. */
+  readonly #audit = new Set<string>()
 
   #mutationObserver: MutationObserver | null = null
   #intersectionObserver: IntersectionObserver | null = null
@@ -151,9 +170,31 @@ export class FeedWatcher {
       if (pending) continue
 
       const state = this.#state.get(post.id)
-      if (state === 'done' || state === 'queued') continue
+      if (state === 'done' || state === 'queued' || state === 'triaged') continue
 
-      this.#state.set(post.id, 'pending')
+      // TRIAGE NOW, not when the post nears the viewport.
+      //
+      // The post is already in the DOM — LinkedIn fetched it long before the user scrolled to
+      // it — and triage is a sub-millisecond pure function. Deferring it bought nothing and cost
+      // latency at exactly the moment it matters: the instant a post appears. Posts the router
+      // clears are resolved here and never touch the observer at all.
+      //
+      // Only the MODEL call stays gated on proximity, because that is the part with real cost.
+      const triage = route(post.text)
+      this.#triage.set(post.id, triage)
+
+      const mustClassify = post.isPromoted || needsModel(triage.band)
+      const auditRate = this.#deps.auditRate ?? AUDIT_SAMPLE_RATE
+      const rnd = this.#deps.random ?? Math.random
+      const audit = !mustClassify && auditRate > 0 && rnd() < auditRate
+
+      if (!mustClassify && !audit) {
+        this.#state.set(post.id, 'done')
+        continue
+      }
+      if (audit) this.#audit.add(post.id)
+
+      this.#state.set(post.id, 'triaged')
       this.#intersectionObserver?.observe(el)
     }
   }
@@ -163,10 +204,17 @@ export class FeedWatcher {
     if (!extracted || extracted.pending) return
 
     const id = extracted.post.id
-    if (this.#state.get(id) !== 'pending') return
+    if (this.#state.get(id) !== 'triaged') return
 
     this.#state.set(id, 'queued')
-    this.#queue.push(id)
+    // PUSH TO THE FRONT. As the user scrolls, the posts that entered the queue earliest are the
+    // ones they have already moved past; the newest arrival is the one about to be on screen.
+    // Draining oldest-first means the visible post waits behind work nobody needs any more.
+    //
+    // This is a fallback ordering only — the scheduler re-ranks by real viewport distance at
+    // dequeue, which subsumes it and additionally DROPS anything scrolled far away. LIFO alone
+    // would still eventually process a post you passed ten screens ago.
+    this.#queue.unshift(id)
     this.#intersectionObserver?.unobserve(el)
     void this.#flush()
   }
@@ -197,27 +245,13 @@ export class FeedWatcher {
             continue
           }
 
-          const triage = route(extracted.post.text)
-
-          // A promoted post must always be classified, whatever the router thinks of its prose.
-          // Ad copy is often perfectly well written and routes `clean`, and the sponsored axis
-          // decides on the page's own label rather than on the text — so skipping here would
-          // mean never hiding an advert whose wording happens to be good.
-          const mustClassify = extracted.post.isPromoted || needsModel(triage.band)
-
-          // Sample a slice of the cleared posts so the router's invisible error becomes countable.
-          const auditRate = this.#deps.auditRate ?? AUDIT_SAMPLE_RATE
-          const rnd = this.#deps.random ?? Math.random
-          const audit = !mustClassify && auditRate > 0 && rnd() < auditRate
-
-          if (!mustClassify && !audit) {
-            // Cheap and confident: the model never needs to see this.
-            this.#state.set(id, 'done')
-            continue
-          }
+          // Triage already ran at scan time; reuse it rather than recomputing.
+          const triage = this.#triage.get(id) ?? route(extracted.post.text)
+          const audit = this.#audit.has(id)
 
           batch.push({
             post: extracted.post,
+            distance: distanceOf(el),
             heuristics: {
               engagement_bait: Math.round(triage.bait * 100),
               ai_written: Math.round(triage.ai * 100),

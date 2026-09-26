@@ -8,7 +8,7 @@
  */
 
 import { deriveIdentity } from './identity'
-import { BUNDLED_SELECTORS, PROMOTED_LABELS, queryAll, queryFirst } from './selectors'
+import { BUNDLED_SELECTORS, PROMOTED_LABELS, queryAll, queryFirst, queryUnion } from './selectors'
 import { hasStub, mountStub, unmountStub } from '../../ui/stub'
 import type { AdapterHealth, ExtractResult, SelectorProfile, SiteAdapter } from '../types'
 import type { MediaRef, Post } from '../../core/types'
@@ -183,6 +183,23 @@ function slugToName(urn: string): string {
     .join(' ')
 }
 
+/**
+ * Is this element actually a post?
+ *
+ * The union of post selectors pulls in siblings that share a `role="listitem"` — S4 saw 11 such
+ * elements for 8 real posts. Filtering on structure rather than on selector precedence is both
+ * more robust and more honest: a post is a thing with an author.
+ *
+ * Deliberately does NOT require text. Feed rows mount as empty slots and are filled later, and
+ * those still need to be tracked so they can be re-evaluated once content arrives.
+ */
+function looksLikePost(el: Element, profile: SelectorProfile): boolean {
+  if (queryFirst(el, profile.authorLink)) return true
+  if (queryFirst(el, profile.bodyText)) return true
+  // A lazily-mounted empty slot: no content yet, but it is a post-shaped hole.
+  return el.hasAttribute('data-lazy-mount-id')
+}
+
 function readMedia(postEl: Element, profile: SelectorProfile): MediaRef[] {
   return queryAll(postEl, profile.media).map((el) => ({
     kind: el.tagName === 'VIDEO' ? ('video' as const) : ('image' as const),
@@ -254,7 +271,13 @@ export class LinkedInAdapter implements SiteAdapter {
   findPosts(feedRoot: Element): Element[] {
     const profile = this.#profile
     if (!profile) return []
-    return outermostOnly(queryAll(feedRoot, profile.post))
+    // UNION, not first-selector-wins. Sponsored posts may carry a different `FeedType` from
+    // ordinary ones, and first-wins would return only the ordinary ones — making every ad
+    // invisible to the whole pipeline. The union's false positives are filtered structurally
+    // below, which is a more honest filter than selector ordering anyway.
+    return outermostOnly(queryUnion(feedRoot, profile.post)).filter((el) =>
+      looksLikePost(el, profile),
+    )
   }
 
   extract(el: Element): ExtractResult | null {

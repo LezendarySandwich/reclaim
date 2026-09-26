@@ -42,3 +42,28 @@ Living. Tick on completion, **append on discovery**. See `../../../AGENTS.md`.
       measured.
 - [ ] The scheduler has no timeout. A model call that hangs forever blocks the single slot
       permanently. Needs a watchdog once real inference latency is known.
+
+## Scheduling corrections — 2026-09-26
+
+Both raised by the user, both correct.
+
+- [x] **Triage was deferred until a post neared the viewport.** It had no business being: the
+      post is already in the DOM, LinkedIn fetched it long before the user scrolled to it, and
+      triage is a sub-millisecond pure function. Deferring bought nothing and cost latency at
+      exactly the moment it matters. Triage now runs at scan time; posts the router clears are
+      resolved immediately and never touch the IntersectionObserver. Only the MODEL call — the
+      part with real cost — stays gated on proximity.
+- [x] **The queue was FIFO.** As the user scrolls, the earliest-queued posts are the ones they
+      have already moved past, so draining oldest-first makes the visible post wait behind work
+      nobody needs. Queue is now LIFO.
+- [x] **But LIFO alone is the weaker answer, so real viewport distance went in too.** LIFO would
+      still eventually process a post passed ten screens ago; distance lets the scheduler DROP
+      it. `viewportDistance` is measured in the content script (one `getBoundingClientRect` per
+      post per batch, not per frame), sent with the batch, and read by the scheduler's existing
+      re-rank-at-dequeue path — which was built for exactly this and had only ever been given
+      batch index as a stand-in.
+
+- [ ] The distance is a snapshot taken when the batch was sent, not live — the service worker
+      has no layout to measure. Good enough to order a batch; the scheduler's re-ranking does the
+      rest, but a long queue will be ordered on slightly stale positions.
+- [ ] `dropBeyond` is still an invented 4 screen-heights.

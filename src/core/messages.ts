@@ -18,6 +18,13 @@ import type { Axis, EngineState, Post, TriageBand, Verdict } from './types'
  */
 export interface TriagedPost {
   post: Post
+  /**
+   * Screen-heights from the viewport at the moment the batch was sent.
+   *
+   * A snapshot, not live — the content script cannot measure layout from the service worker.
+   * Good enough to order a batch sensibly; the scheduler's re-ranking does the rest.
+   */
+  distance?: number
   heuristics: Partial<Record<Axis, number>>
   /**
    * This post was routed `clean` and is being sent to the model ANYWAY, purely to measure how

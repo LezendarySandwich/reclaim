@@ -37,6 +37,17 @@ export interface ClassifyDeps {
    * lookup failure just means a cache miss: never let storage break classification.
    */
   lookupCached?: (cacheKey: string) => Promise<CachedVerdict | null>
+  /**
+   * How far a post currently is from the viewport, in screen-heights. Lower runs sooner.
+   *
+   * Read at DEQUEUE, not at submit — by the time a slot frees the user has scrolled, and the
+   * ordering captured at submit time describes where they were, not where they are. This is
+   * what lets the scheduler drop work for posts already scrolled past instead of grinding
+   * through a backlog nobody is looking at any more.
+   *
+   * Without it, ordering falls back to batch position, which is only a proxy.
+   */
+  viewportDistance?: (postId: string) => number
 }
 
 /** Model output for one post: per-axis scores plus the model's own one-line reason. */
@@ -177,9 +188,10 @@ export async function classifyBatch(
 
       const outcome = await scheduler.submit({
         key: triaged.post.id,
-        // Batch order is a reasonable proxy for viewport distance: the content script sends
-        // nearest-first. A live caller supplies a real measurement instead.
-        priority: () => index,
+        // Real distance when the caller can measure it; batch position otherwise.
+        priority: deps.viewportDistance
+          ? () => deps.viewportDistance!(triaged.post.id)
+          : () => index,
         run: async () => {
           const judged = await engine.judge(triaged.post)
           return { scores: judged.scores, reason: judged.reason }

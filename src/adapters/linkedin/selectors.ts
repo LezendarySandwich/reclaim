@@ -189,3 +189,26 @@ export function queryAll(root: ParentNode, chain: readonly string[]): Element[] 
   }
   return []
 }
+
+/**
+ * UNION of every selector in the chain, deduplicated, in document order.
+ *
+ * Different from `queryAll`, and the difference matters. `queryAll` is first-selector-wins,
+ * which is right for a FIELD — you want the best available selector for one value. It is wrong
+ * for finding POSTS: if ordinary posts match an early selector and sponsored posts only match a
+ * later one, first-wins returns the ordinary posts and the ads become invisible. That is a
+ * silent, total failure for a whole category of post.
+ *
+ * The cost of a union is false positives, which the caller filters structurally.
+ */
+export function queryUnion(root: ParentNode, chain: readonly string[]): Element[] {
+  const seen = new Set<Element>()
+  for (const sel of chain) {
+    try {
+      for (const el of root.querySelectorAll(sel)) seen.add(el)
+    } catch {
+      // Invalid selector from a remote config — skip it, never break the scan.
+    }
+  }
+  return [...seen]
+}

@@ -211,6 +211,9 @@ export default defineBackground(() => {
               scheduler,
               // Scrolling back over a post should not re-run a 4GB model on text it has already
               // judged under the same rules.
+              // The content script measured this before sending; the worker has no layout.
+              viewportDistance: (postId) =>
+                msg.posts.find((p) => p.post.id === postId)?.distance ?? 0,
               lookupCached: async (cacheKey) => {
                 const row = await getVerdict(cacheKey)
                 return row ? { signals: row.signals as CachedVerdict['signals'] } : null

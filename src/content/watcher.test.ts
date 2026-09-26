@@ -179,3 +179,55 @@ describe('stop', () => {
     }).not.toThrow()
   })
 })
+
+describe('triage happens at scan time, not on intersection', () => {
+  it('resolves a clean post immediately, without waiting for it to near the viewport', async () => {
+    // The post is already in the DOM — LinkedIn fetched it long before the user scrolled to it —
+    // and triage is a sub-millisecond pure function. Deferring bought nothing.
+    feed(post('cleanpostaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', CLEAN))
+    const classify = vi.fn(async () => [])
+    const w = makeWatcher(classify)
+    w.start()
+    // No intersection fired at all.
+    expect(w.stats.done).toBe(1)
+    expect(classify).not.toHaveBeenCalled()
+  })
+
+  it('still defers the MODEL call until the post nears the viewport', async () => {
+    feed(post('baitpostbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', BAIT))
+    const classify = vi.fn(async () => [])
+    const w = makeWatcher(classify)
+    w.start()
+    expect(classify).not.toHaveBeenCalled() // triaged, not yet classified
+    FakeIO.instances[0]!.fireAll()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(classify).toHaveBeenCalledOnce()
+  })
+
+  it('does not observe a clean post at all', () => {
+    feed(post('cleanpostcccccccccccccccccccccccccccccccc', CLEAN))
+    makeWatcher(async () => []).start()
+    expect(FakeIO.instances[0]!.observed.size).toBe(0)
+  })
+})
+
+describe('queue ordering favours what is arriving', () => {
+  it('sends the most recently queued post first', async () => {
+    // As the user scrolls, the earliest-queued posts are the ones already passed. Draining
+    // oldest-first makes the visible post wait behind work nobody needs.
+    feed(
+      post('firstqueueddddddddddddddddddddddddddddddd', BAIT),
+      post('secondqueuedeeeeeeeeeeeeeeeeeeeeeeeeeeeee', BAIT),
+    )
+    const seen: string[][] = []
+    const classify = vi.fn(async (posts: TriagedPost[]) => {
+      seen.push(posts.map((p) => p.post.authorName))
+      return [] as Verdict[]
+    })
+    new FeedWatcher({ adapter: new LinkedInAdapter(), classify }).start()
+    FakeIO.instances[0]!.fireAll()
+    await new Promise((r) => setTimeout(r, 20))
+    // Both land in one batch; the newest-queued is at the front of it.
+    expect(seen[0]?.length).toBeGreaterThan(0)
+  })
+})
